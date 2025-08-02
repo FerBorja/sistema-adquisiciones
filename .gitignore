@@ -1,0 +1,103 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Django
+*.log
+media/
+staticfiles/
+
+# PostgreSQL (local files that shouldn't go to git)
+*.pgsql
+*.dump
+*.backup
+*.sql
+
+# Environment variables
+.env
+*.env
+
+# Node (Frontend)
+node_modules/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# PyCharm
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# JetBrains IDEs
+.idea/
+
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*$py.class
+
+# Test reports
+coverage/
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.pytest_cache/
+
+# Migrations (Optional: if you prefer to not commit auto-generated migration files)
+# Uncomment if needed
+# **/migrations/*.py
+# **/migrations/*.pyc
+# !**/migrations/__init__.py
+
+# Logs and runtime files
+*.log
+*.pot
+*.mo
+
+# SASS
+.sass-cache/
+.cache/
+
+# NPM/Yarn lock files (optional, depends on team rules)
+# yarn.lock
+# package-lock.json
+
+# Mac system files
+Icon?
+.AppleDouble
+.LSOverride
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Python profiling files
+*.prof
+
+# SQLite (you are not using it, but safe to leave)
+*.sqlite3
+
+# Docker (optional)
+.docker/
+
+# Others (Optional)
+*.bak
+*.swp
+*~
