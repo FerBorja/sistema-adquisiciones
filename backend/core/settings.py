@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     'requisitions',
     'corsheaders',
     'rest_framework_simplejwt.token_blacklist',
+    'catalogs',
 ]
 
 MIDDLEWARE = [
