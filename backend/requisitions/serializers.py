@@ -5,7 +5,7 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = RequisitionItem
         fields = '__all__'
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'requisition']
 
 class RequisitionSerializer(serializers.ModelSerializer):
     items = RequisitionItemSerializer(many=True, required=False)
@@ -18,6 +18,7 @@ class RequisitionSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         user = self.context['request'].user
+        validated_data.pop('user', None)
         requisition = Requisition.objects.create(user=user, **validated_data)
         for item_data in items_data:
             RequisitionItem.objects.create(requisition=requisition, **item_data)

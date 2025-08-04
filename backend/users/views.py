@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.response import Response
 from django.contrib.auth.models import User
+from rest_framework.permissions import AllowAny
 
 class EmployeeNumberTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = 'employee_number'  # define el campo username
@@ -23,9 +24,11 @@ class LoginView(TokenObtainPairView):
 
 class RegisterView(generics.CreateAPIView):
     serializer_class = RegistrationSerializer
+    permission_classes = [AllowAny]
 
 class SendCodeView(generics.CreateAPIView):
     serializer_class = SendCodeSerializer
+    permission_classes = [AllowAny]
 
 class PasswordResetRequestView(generics.GenericAPIView):
     def post(self, request, *args, **kwargs):
