@@ -22,6 +22,17 @@ sistema-adquisiciones/
         logs/
             django.log
         media/ (empty)
+        reports/
+            __pycache__/
+            migrations/
+            __init__.py
+            admin.py
+            apps.py
+            models.py
+            pdf_generator.py
+            tests.py
+            urls.py
+            views.py
         requisitions/
             __pycache__
             migrations/

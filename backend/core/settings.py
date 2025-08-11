@@ -253,11 +253,11 @@ LOGGING = {
             'filename': BASE_DIR / 'logs/django.log',
             'formatter': 'verbose',
         },
-    },
+        },
     'loggers': {
         'django': {
             'handlers': ['console', 'file'],
-            'level': 'DEBUG' if DEBUG else 'INFO',
+            'level': 'INFO',  # or WARNING or ERROR instead of DEBUG
             'propagate': True,
         },
         'django.request': {
