@@ -159,7 +159,8 @@ REST_FRAMEWORK = {
         'user': '1000/day',
         'password_reset': '3/hour',
         'registration': '5/hour',
-    }            
+    },
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],            
 }
 
 AUTH_USER_MODEL = 'users.User'
