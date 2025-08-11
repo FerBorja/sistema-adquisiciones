@@ -20,22 +20,22 @@ sistema-adquisiciones/
             urls.py
             wsgi.py
         logs/
+            django.log
         media/ (empty)
         requisitions/
             __pycache__
             migrations/
-            utils/
-                __pycache__
-                pdf_generator.py
             __init__.py
             admin.py
             apps.py
             models.py
+            pdf_generator.py
             serializers.py
             tests.py
             urls.py
             views.py
-        staticfiles/ (empty)
+        staticfiles/
+            uach_logo.png
         templates/ (empty)
         users/
             __pycache__
@@ -47,6 +47,7 @@ sistema-adquisiciones/
             serializers.py
             serializers_password.py
             tests.py
+            throttles.py
             urls.py
             views.py
         venv/
