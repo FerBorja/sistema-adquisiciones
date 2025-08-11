@@ -1,17 +1,18 @@
 from rest_framework_simplejwt.views import TokenObtainPairView
-from .serializers import EmployeeNumberTokenObtainPairSerializer, RegistrationSerializer, SendCodeSerializer
+from .serializers import EmployeeNumberTokenObtainPairSerializer, RegistrationSerializer, SendCodeSerializer, UserSerializer
 from .models import User
 from rest_framework import generics, status
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.response import Response
 from django.contrib.auth.models import User
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from .throttles import PasswordResetThrottle, RegistrationThrottle
 from django.core.mail import send_mail
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.contrib.auth import get_user_model
+from rest_framework.views import APIView
 
 User = get_user_model()
 
@@ -101,4 +102,11 @@ class PasswordResetConfirmView(generics.GenericAPIView):
         user.save()
 
         return Response({"message": "Password has been reset successfully."})
+    
+class UserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
 
