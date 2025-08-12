@@ -1,32 +1,72 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import React, { useContext } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { AuthProvider, AuthContext } from './contexts/AuthContext';
+import { ToastProvider } from './contexts/ToastContext';
 
 import Navbar from './components/Layout/Navbar';
+import Footer from './components/Layout/Footer';
+import ToastNotification from './components/UI/ToastNotification';
+
 import Home from './pages/Home';
 import About from './pages/About';
 import Login from './pages/Login';
-import RequisitionDetail from './pages/RequisitionDetail';
-import NotFound from './pages/NotFound';
 import RequisitionList from './components/Requisitions/RequisitionList';
 import RequisitionForm from './components/Requisitions/RequisitionForm';
+import RequisitionDetail from './pages/RequisitionDetail';
+import NotFound from './pages/NotFound';
+
 import PrivateRoute from './routes/PrivateRoute';
+
+function Layout() {
+  const location = useLocation();
+  const { token } = useContext(AuthContext);
+
+  // Hide Navbar on login page
+  const hideNavbar = location.pathname === '/login';
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      {!hideNavbar && <Navbar />}
+      <main className="flex-1 p-4">
+        <Routes>
+          {/* Redirect from root depending on auth */}
+          <Route
+            path="/"
+            element={
+              token ? <Navigate to="/requisitions" replace /> : <Navigate to="/login" replace />
+            }
+          />
+          <Route path="/about" element={<About />} />
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/requisitions"
+            element={<PrivateRoute><RequisitionList /></PrivateRoute>}
+          />
+          <Route
+            path="/requisitions/new"
+            element={<PrivateRoute><RequisitionForm /></PrivateRoute>}
+          />
+          <Route
+            path="/requisitions/:id"
+            element={<PrivateRoute><RequisitionDetail /></PrivateRoute>}
+          />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </main>
+      <Footer />
+      <ToastNotification />
+    </div>
+  );
+}
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Navbar />
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/requisitions" element={<PrivateRoute><RequisitionList /></PrivateRoute>} />
-          <Route path="/requisitions/new" element={<PrivateRoute><RequisitionForm /></PrivateRoute>} />
-          <Route path="/requisitions/:id" element={<PrivateRoute><RequisitionDetail /></PrivateRoute>} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <Router>
+          <Layout />
+        </Router>
+      </AuthProvider>
+    </ToastProvider>
   );
 }

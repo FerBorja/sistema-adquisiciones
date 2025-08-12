@@ -21,7 +21,6 @@ sistema-adquisiciones/
             wsgi.py
         logs/
             django.log
-        media/ (empty)
         reports/
             __pycache__/
             migrations/
@@ -47,7 +46,6 @@ sistema-adquisiciones/
             views.py
         staticfiles/
             uach_logo.png
-        templates/ (empty)
         users/
             __pycache__
             migrations/
@@ -68,6 +66,8 @@ sistema-adquisiciones/
     frontend/
         node_modules/
         public/
+            images/
+                uach_logo.png
             favicon.ico
             index.html
             logo192.png
@@ -77,17 +77,38 @@ sistema-adquisiciones/
         src/
             api/
                 apiClient.js
-            pages
+            assets/
+                logo.svg
+            components/
+                Layout/
+                    Footer.jsx
+                    Navbar.jsx
+                Requisitions/
+                    RequisitionCard.jsx
+                    RequisitionForm.jsx
+                    RequisitionList.jsx
+                UI/
+                    LoadingSpinner.jsx
+                    ToastNotification.jsx
+            contexts/
+                AuthContext.jsx
+                ToastContext.jsx
+            pages/
                 About.jsx
                 Home.jsx
+                Login.jsx
+                NotFound.jsx
+                RequisitionDetail.jsx
+            routes/
+                PrivateRoute.jsx
             App.css
             App.js
             App.test.js
             index.css
             index.js
-            logo.svg
             reportWebVitals.js
             setupTests.js
+        .env
         package.json
         package-lock.json
         postcss.config.js
