@@ -8,7 +8,7 @@ export default function Navbar() {
 
   const handleLogout = () => {
     logout();
-    navigate('/login');  // Redirect after logout
+    navigate('/login'); // Redirect after logout
   };
 
   return (
@@ -30,7 +30,10 @@ export default function Navbar() {
             </button>
           </>
         ) : (
-          <Link to="/login">Login</Link>
+          <>
+            <Link to="/login" className="mr-4">Login</Link>
+            <Link to="/register">Register</Link>
+          </>
         )}
       </div>
     </nav>

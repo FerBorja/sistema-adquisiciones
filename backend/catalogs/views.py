@@ -1,4 +1,5 @@
 from rest_framework import viewsets, permissions
+from rest_framework.permissions import AllowAny
 from requisitions.models import (
     Department, Project, FundingSource, BudgetUnit,
     Agreement, Category, Tender, ExternalService,
@@ -13,7 +14,7 @@ from .serializers import (
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [AllowAny]
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()

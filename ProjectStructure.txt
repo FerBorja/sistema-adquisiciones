@@ -21,6 +21,8 @@ sistema-adquisiciones/
             wsgi.py
         logs/
             django.log
+        media/
+            profile_pictures/
         reports/
             __pycache__/
             migrations/
@@ -98,6 +100,7 @@ sistema-adquisiciones/
                 Home.jsx
                 Login.jsx
                 NotFound.jsx
+                Register.jsx
                 RequisitionDetail.jsx
             routes/
                 PrivateRoute.jsx
