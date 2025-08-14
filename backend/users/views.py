@@ -51,25 +51,27 @@ class PasswordResetRequestView(generics.GenericAPIView):
         try:
             user = User.objects.get(email=email)
         except User.DoesNotExist:
-            # For security, respond with success even if email not found
+            # Always respond success for security
             return Response({"message": "If the email exists, a reset link has been sent."})
 
         token_generator = PasswordResetTokenGenerator()
         token = token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
 
-        reset_url = f"http://your-frontend-domain/reset-password-confirm/{uid}/{token}/"
+        frontend_base_url = "http://localhost:3000"  # Change to your production frontend URL
+        reset_url = f"{frontend_base_url}/change-password?uid={uid}&token={token}"
 
-        # Send email (customize subject/message as needed)
+        # Send email
         send_mail(
             subject="Password Reset Request - Sistema de Adquisiciones",
             message=f"Use the following link to reset your password:\n{reset_url}\nThe link is valid for a limited time.",
-            from_email=None,  # Use DEFAULT_FROM_EMAIL
+            from_email=None,  # Uses DEFAULT_FROM_EMAIL
             recipient_list=[email],
             fail_silently=False,
         )
 
         return Response({"message": "If the email exists, a reset link has been sent."})
+
 
     
 class PasswordResetConfirmView(generics.GenericAPIView):
@@ -102,6 +104,7 @@ class PasswordResetConfirmView(generics.GenericAPIView):
         user.save()
 
         return Response({"message": "Password has been reset successfully."})
+
     
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]

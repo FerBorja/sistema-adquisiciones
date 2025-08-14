@@ -105,6 +105,12 @@ export default function Login() {
         >
           ¿No tienes una cuenta? Regístrate
         </Link>
+        <Link
+          to="/password-reset-request"
+          className="block text-center text-indigo-700 font-semibold hover:underline"
+        >
+          ¿Olvidaste tu contraseña? Cambiar contraseña
+        </Link>      
       </form>
     </div>
   );

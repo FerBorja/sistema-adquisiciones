@@ -102,6 +102,8 @@ sistema-adquisiciones/
                 NotFound.jsx
                 Register.jsx
                 RequisitionDetail.jsx
+                ChangePassword.jsx
+                PasswordResetRequest.jsx
             routes/
                 PrivateRoute.jsx
             App.css

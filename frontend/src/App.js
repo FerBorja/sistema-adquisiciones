@@ -11,11 +11,13 @@ import ToastNotification from "./components/UI/ToastNotification";
 import Home from "./pages/Home";
 import About from "./pages/About";
 import Login from "./pages/Login";
-import Register from "./pages/Register"; // New public route
+import Register from "./pages/Register";
 import RequisitionList from "./components/Requisitions/RequisitionList";
 import RequisitionForm from "./components/Requisitions/RequisitionForm";
 import RequisitionDetail from "./pages/RequisitionDetail";
 import NotFound from "./pages/NotFound";
+import ChangePassword from "./pages/ChangePassword";
+import PasswordResetRequest from './pages/PasswordResetRequest';
 
 import PrivateRoute from "./routes/PrivateRoute";
 
@@ -23,8 +25,8 @@ function Layout() {
   const location = useLocation();
   const { token } = useContext(AuthContext);
 
-  // Hide Navbar on login and register pages
-  const hideNavbar = location.pathname === "/login" || location.pathname === "/register";
+  // Hide Navbar and Footer on login, register, and change-password pages
+  const hideNavbar = ["/login", "/register", "/change-password"].includes(location.pathname);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -40,7 +42,10 @@ function Layout() {
           />
           <Route path="/about" element={<About />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} /> {/* New public route */}
+          <Route path="/register" element={<Register />} />
+          <Route path="/password-reset-request" element={<PasswordResetRequest />} />
+          <Route path="/password-reset-confirm/:uid/:token" element={<ChangePassword />} />
+          <Route path="/change-password" element={<ChangePassword />} />
           <Route
             path="/requisitions"
             element={
@@ -68,7 +73,7 @@ function Layout() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
-      <Footer />
+      {!hideNavbar && <Footer />}
       <ToastNotification />
     </div>
   );
