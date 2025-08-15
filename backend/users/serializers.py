@@ -8,7 +8,7 @@ from django.core.mail import send_mail
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'employee_number', 'first_name', 'last_name', 'department', 'email', 'extension_number', 'profile_picture')
+        fields = ('id', 'employee_number', 'first_name', 'last_name', 'role', 'department', 'email', 'extension_number', 'profile_picture')
 
 class LoginSerializer(serializers.Serializer):
     employee_number = serializers.CharField()

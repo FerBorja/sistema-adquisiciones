@@ -9,17 +9,18 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (token) {
-      // Optionally fetch user profile from backend
       apiClient
         .get('/users/me/', { headers: { Authorization: `Bearer ${token}` } })
-        .then((res) => setUser(res.data))
+        .then((res) => {
+          setUser(res.data); // log removed
+        })
         .catch((err) => {
           console.error('Error fetching user profile:', err);
           logout();
         });
     }
   }, [token]);
-
+  
   const login = async ({ employee_number, password }) => {
     try {
       const res = await apiClient.post('/token/', {
