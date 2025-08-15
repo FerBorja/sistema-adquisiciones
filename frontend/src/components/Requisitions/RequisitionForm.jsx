@@ -1,23 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/apiClient';
 import LoadingSpinner from '../UI/LoadingSpinner';
 import { useToast } from '../../contexts/ToastContext';
+import { AuthContext } from '../../contexts/AuthContext';
 
 export default function RequisitionForm() {
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { user } = useContext(AuthContext);
 
   // Catalogs for dropdowns
   const [catalogs, setCatalogs] = useState({
-    departments: [],
     projects: [],
     categories: [],
+    funding_sources: [],
+    budget_units: [],
+    agreements: [],
+    tenders: [],
   });
 
   const [formData, setFormData] = useState({
-    department: '',
+    department: user?.department || '',
     project: '',
+    funding_source: '',
+    budget_unit: '',
+    agreement: '',
+    tender: '',
     category: '',
     title: '',
     description: '',
@@ -25,6 +34,16 @@ export default function RequisitionForm() {
   });
 
   const [loading, setLoading] = useState(false);
+
+  // Prefill department from current user
+  useEffect(() => {
+    if (user?.department) {
+      setFormData(prev => ({
+        ...prev,
+        department: user.department,
+      }));
+    }
+  }, [user]);
 
   // Function to set custom required message
   const setRequiredMessage = (e, message) => {
@@ -35,19 +54,25 @@ export default function RequisitionForm() {
   // Fetch catalogs for dropdowns
   useEffect(() => {
     Promise.all([
-      apiClient.get('/catalogs/departments/'),
       apiClient.get('/catalogs/projects/'),
       apiClient.get('/catalogs/categories/'),
+      apiClient.get('/catalogs/funding-sources/'),
+      apiClient.get('/catalogs/budget-units/'),
+      apiClient.get('/catalogs/agreements/'),
+      apiClient.get('/catalogs/tenders/'),
     ])
-      .then(([depRes, projRes, catRes]) => {
+      .then(([projRes, catRes, fundRes, buRes, agreeRes, tenderRes]) => {
         setCatalogs({
-          departments: depRes.data,
-          projects: projRes.data,
-          categories: catRes.data,
+          projects: projRes.data || [],
+          categories: catRes.data || [],
+          funding_sources: fundRes.data || [],
+          budget_units: buRes.data || [],
+          agreements: agreeRes.data || [],
+          tenders: tenderRes.data || [],
         });
       })
       .catch(err => {
-        console.error('Error loading catalogs:', err);
+        console.error('Error loading catálogos:', err);
         showToast('Error al cargar catálogos.', 'error');
       });
   }, [showToast]);
@@ -67,15 +92,18 @@ export default function RequisitionForm() {
       await apiClient.post('/requisitions/', formData);
       showToast('Requisición creada correctamente!', 'success');
 
-      // Reset form to initial empty state
-      setFormData({
-        department: '',
+      setFormData(prev => ({
+        ...prev,
         project: '',
+        funding_source: '',
+        budget_unit: '',
+        agreement: '',
+        tender: '',
         category: '',
         title: '',
         description: '',
         quantity: 1,
-      });
+      }));
 
       navigate('/requisitions');
     } catch (err) {
@@ -98,15 +126,12 @@ export default function RequisitionForm() {
       <select
         name="department"
         value={formData.department}
-        onChange={handleChange}
-        required
-        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un departamento')}
-        className="border p-2 w-full rounded"
+        disabled
+        className="border p-2 w-full rounded bg-gray-100"
       >
-        <option value="">Seleccione Departamento</option>
-        {catalogs.departments.map(dep => (
-          <option key={dep.id} value={dep.id}>{dep.name}</option>
-        ))}
+        <option value={formData.department || ''}>
+          {formData.department || 'No asignado'}
+        </option>
       </select>
 
       {/* Project */}
@@ -121,7 +146,81 @@ export default function RequisitionForm() {
       >
         <option value="">Seleccione Proyecto</option>
         {catalogs.projects.map(proj => (
-          <option key={proj.id} value={proj.id}>{proj.name}</option>
+          <option key={proj.id} value={proj.id}>
+            {proj.description}
+          </option>
+        ))}
+      </select>
+
+      {/* Funding Source */}
+      <label className="block mb-1 font-medium">Fuente de Financiamiento</label>
+      <select
+        name="funding_source"
+        value={formData.funding_source}
+        onChange={handleChange}
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una fuente de financiamiento')}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Seleccione Fuente de Financiamiento</option>
+        {catalogs.funding_sources.map(fs => (
+          <option key={fs.id} value={fs.id}>
+            {fs.code} - {fs.description}
+          </option>
+        ))}
+      </select>
+
+      {/* Budget Unit */}
+      <label className="block mb-1 font-medium">Unidad Presupuestal</label>
+      <select
+        name="budget_unit"
+        value={formData.budget_unit}
+        onChange={handleChange}
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una unidad presupuestal')}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Seleccione Unidad Presupuestal</option>
+        {catalogs.budget_units.map(bu => (
+          <option key={bu.id} value={bu.id}>
+            {bu.code} - {bu.description}
+          </option>
+        ))}
+      </select>
+
+      {/* Agreements */}
+      <label className="block mb-1 font-medium">Convenios</label>
+      <select
+        name="agreement"
+        value={formData.agreement}
+        onChange={handleChange}
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un convenio')}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Seleccione Convenio</option>
+        {catalogs.agreements.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.code} - {a.description}
+          </option>
+        ))}
+      </select>
+
+      {/* Tender */}
+      <label className="block mb-1 font-medium">Licitación</label>
+      <select
+        name="tender"
+        value={formData.tender}
+        onChange={handleChange}
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una licitación')}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Seleccione Licitación</option>
+        {catalogs.tenders.map(t => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+          </option>
         ))}
       </select>
 
@@ -137,7 +236,9 @@ export default function RequisitionForm() {
       >
         <option value="">Seleccione Categoría</option>
         {catalogs.categories.map(cat => (
-          <option key={cat.id} value={cat.id}>{cat.name}</option>
+          <option key={cat.id} value={cat.id}>
+            {cat.name}
+          </option>
         ))}
       </select>
 

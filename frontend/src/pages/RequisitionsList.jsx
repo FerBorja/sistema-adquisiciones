@@ -49,7 +49,6 @@ export default function RequisitionsList() {
               <th className="px-4 py-2 border">Motivo</th>
               <th className="px-4 py-2 border">Estatus</th>
               <th className="px-4 py-2 border">Imprimir</th>
-              <th className="px-4 py-2 border">Ver</th>
               {canModify && <th className="px-4 py-2 border">Modificar</th>}
             </tr>
           </thead>
@@ -57,7 +56,7 @@ export default function RequisitionsList() {
             {requisitions.length === 0 ? (
               <tr>
                 <td
-                  colSpan={canModify ? 7 : 6}
+                  colSpan={canModify ? 6 : 5} // Adjusted colspan
                   className="text-center py-4 border-2 border-indigo-300"
                 >
                   No hay requisiciones
@@ -82,9 +81,7 @@ export default function RequisitionsList() {
                         try {
                           const token = localStorage.getItem('token'); // get JWT
                           const response = await fetch(`http://localhost:8000/api/requisitions/${req.id}/export_pdf/`, {
-                            headers: {
-                              Authorization: `Bearer ${token}`,
-                            },
+                            headers: { Authorization: `Bearer ${token}` },
                           });
 
                           if (!response.ok) throw new Error('Error generating PDF');
@@ -102,11 +99,6 @@ export default function RequisitionsList() {
                       }}
                     >
                       PDF
-                    </button>
-                  </td>
-                  <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                    <button className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700">
-                      Ver
                     </button>
                   </td>
                   {canModify && (
