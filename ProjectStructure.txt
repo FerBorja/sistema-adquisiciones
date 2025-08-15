@@ -85,6 +85,8 @@ sistema-adquisiciones/
                 Layout/
                     Footer.jsx
                     Navbar.jsx
+                    RequisitionsLayout.jsx
+                    Sidebar.jsx
                 Requisitions/
                     RequisitionCard.jsx
                     RequisitionForm.jsx
@@ -104,6 +106,7 @@ sistema-adquisiciones/
                 RequisitionDetail.jsx
                 ChangePassword.jsx
                 PasswordResetRequest.jsx
+                RequisitionsList.jsx
             routes/
                 PrivateRoute.jsx
             App.css

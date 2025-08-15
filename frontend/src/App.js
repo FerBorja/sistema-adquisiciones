@@ -18,6 +18,9 @@ import RequisitionDetail from "./pages/RequisitionDetail";
 import NotFound from "./pages/NotFound";
 import ChangePassword from "./pages/ChangePassword";
 import PasswordResetRequest from './pages/PasswordResetRequest';
+import RequisitionsListPage from "./pages/RequisitionsList";
+import RequisitionsLayout from './components/Layout/RequisitionsLayout';
+import RequisitionsList from './pages/RequisitionsList';
 
 import PrivateRoute from "./routes/PrivateRoute";
 
@@ -26,7 +29,13 @@ function Layout() {
   const { token } = useContext(AuthContext);
 
   // Hide Navbar and Footer on login, register, and change-password pages
-  const hideNavbar = ["/login", "/register", "/change-password"].includes(location.pathname);
+  const requisitionsPages = [
+    "/requisitions",
+    "/requisitions/new",
+    // Add more requisition routes if needed
+  ];
+  const hideNavbar = ["/login", "/register", "/change-password", ...requisitionsPages].includes(location.pathname);
+
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -50,7 +59,28 @@ function Layout() {
             path="/requisitions"
             element={
               <PrivateRoute>
-                <RequisitionList />
+                <RequisitionsLayout>
+                  <RequisitionsList />
+                </RequisitionsLayout>
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/requisitions/new"
+            element={
+              <PrivateRoute>
+                <RequisitionsLayout>
+                  <RequisitionForm />
+                </RequisitionsLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/requisitions"
+            element={
+              <PrivateRoute>
+                <RequisitionsListPage />
               </PrivateRoute>
             }
           />
