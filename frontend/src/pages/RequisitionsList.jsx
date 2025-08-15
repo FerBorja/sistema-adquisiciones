@@ -76,7 +76,31 @@ export default function RequisitionsList() {
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.requisition_reason}</td>
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.status || 'Pendiente'}</td>
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                    <button className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700">
+                    <button
+                      className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                      onClick={async () => {
+                        try {
+                          const token = localStorage.getItem('token'); // get JWT
+                          const response = await fetch(`http://localhost:8000/api/requisitions/${req.id}/export_pdf/`, {
+                            headers: {
+                              Authorization: `Bearer ${token}`,
+                            },
+                          });
+
+                          if (!response.ok) throw new Error('Error generating PDF');
+
+                          const blob = await response.blob();
+                          const url = window.URL.createObjectURL(blob);
+
+                          // Open in new tab
+                          const pdfWindow = window.open();
+                          pdfWindow.location.href = url;
+                        } catch (err) {
+                          console.error(err);
+                          alert('No se pudo generar el PDF');
+                        }
+                      }}
+                    >
                       PDF
                     </button>
                   </td>
