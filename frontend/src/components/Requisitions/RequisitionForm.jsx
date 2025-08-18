@@ -5,7 +5,7 @@ import LoadingSpinner from '../UI/LoadingSpinner';
 import { useToast } from '../../contexts/ToastContext';
 import { AuthContext } from '../../contexts/AuthContext';
 
-export default function RequisitionForm({ embed = false }) {
+export default function RequisitionForm({ embed = false, formData, setFormData }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { user } = useContext(AuthContext);
@@ -22,7 +22,8 @@ export default function RequisitionForm({ embed = false }) {
     external_services: [],
   });
 
-  const [formData, setFormData] = useState({
+  // Controlled-if-provided pattern
+  const [internalFormData, setInternalFormData] = useState(() => ({
     department: user?.department || '',
     project: '',
     funding_source: '',
@@ -33,10 +34,24 @@ export default function RequisitionForm({ embed = false }) {
     title: '',
     description: '',
     external_service: '',
-  });
+    fecha: new Date().toLocaleDateString('es-MX'),
+    solicitante: ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim(),
+    project_label: '',
+    funding_source_label: '',
+    budget_unit_label: '',
+    agreement_label: '',
+    tender_label: '',
+    category_label: '',
+    external_service_label: '',
+  }));
+
+  const isControlled = Boolean(formData && setFormData);
+  const data = isControlled ? formData : internalFormData;
+  const update = isControlled ? setFormData : setInternalFormData;
 
   const [loading, setLoading] = useState(false);
 
+  // Redirect if no token
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
@@ -45,20 +60,23 @@ export default function RequisitionForm({ embed = false }) {
     }
   }, [navigate, showToast]);
 
+  // Keep department/solicitante updated if user changes
   useEffect(() => {
-    if (user?.department) {
-      setFormData(prev => ({
+    if (user?.department || user?.first_name || user?.last_name) {
+      update((prev) => ({
         ...prev,
-        department: user.department,
+        department: user?.department || prev.department,
+        solicitante: ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim() || prev.solicitante,
       }));
     }
-  }, [user]);
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setRequiredMessage = (e, message) => {
     e.target.setCustomValidity(message);
     e.target.oninput = () => e.target.setCustomValidity('');
   };
 
+  // Fetch catalogs once
   useEffect(() => {
     if (fetchedCatalogs.current) return;
     fetchedCatalogs.current = true;
@@ -97,39 +115,59 @@ export default function RequisitionForm({ embed = false }) {
         showToast?.('Error al cargar catálogos.', 'error');
       }
     })();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleChange = (e) => {
-    setFormData(prev => ({
+    update((prev) => ({
       ...prev,
       [e.target.name]: e.target.value,
     }));
   };
 
+  // For selects, also store the display label so Step 2 can show names
+  const handleSelectChange = (e, valueKey, labelKey) => {
+    const val = e.target.value;
+    const label = e.target.options[e.target.selectedIndex]?.text || '';
+    update((prev) => ({ ...prev, [valueKey]: val, [labelKey]: label }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      await apiClient.post('/requisitions/', formData);
+      // Only send backend fields
+      const payload = {
+        department: data.department,
+        project: data.project,
+        funding_source: data.funding_source,
+        budget_unit: data.budget_unit,
+        agreement: data.agreement,
+        tender: data.tender,
+        category: data.category,
+        title: data.title,
+        description: data.description,
+        external_service: data.external_service,
+      };
+      await apiClient.post('/requisitions/', payload);
       showToast?.('Requisición creada correctamente!', 'success');
       navigate('/requisitions');
     } catch (err) {
-      console.error('Error creating requisition:', err);
+      console.error('Error creating requisición:', err);
       showToast?.('Error al crear requisición.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
+  // ----- shared content -----
   const content = (
     <>
-      {/* Department */}
+      {/* Department (required, read-only) */}
       <label className="block mb-1 font-medium">Departamento</label>
       <input
         type="text"
         name="department"
-        value={formData.department}
+        value={data.department}
         readOnly
         required
         onInvalid={(e) => setRequiredMessage(e, 'El departamento es obligatorio')}
@@ -140,14 +178,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Proyecto</label>
       <select
         name="project"
-        value={formData.project}
-        onChange={handleChange}
+        value={data.project}
+        onChange={(e) => handleSelectChange(e, 'project', 'project_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un proyecto')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Proyecto</option>
-        {catalogs.projects.map(proj => (
+        {catalogs.projects.map((proj) => (
           <option key={proj.id} value={proj.id}>
             {proj.description}
           </option>
@@ -158,14 +196,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Fuente de Financiamiento</label>
       <select
         name="funding_source"
-        value={formData.funding_source}
-        onChange={handleChange}
+        value={data.funding_source}
+        onChange={(e) => handleSelectChange(e, 'funding_source', 'funding_source_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una fuente de financiamiento')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Fuente de Financiamiento</option>
-        {catalogs.funding_sources.map(fs => (
+        {catalogs.funding_sources.map((fs) => (
           <option key={fs.id} value={fs.id}>
             {fs.code} - {fs.description}
           </option>
@@ -176,14 +214,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Unidad Presupuestal</label>
       <select
         name="budget_unit"
-        value={formData.budget_unit}
-        onChange={handleChange}
+        value={data.budget_unit}
+        onChange={(e) => handleSelectChange(e, 'budget_unit', 'budget_unit_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una unidad presupuestal')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Unidad Presupuestal</option>
-        {catalogs.budget_units.map(bu => (
+        {catalogs.budget_units.map((bu) => (
           <option key={bu.id} value={bu.id}>
             {bu.code} - {bu.description}
           </option>
@@ -194,14 +232,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Convenios</label>
       <select
         name="agreement"
-        value={formData.agreement}
-        onChange={handleChange}
+        value={data.agreement}
+        onChange={(e) => handleSelectChange(e, 'agreement', 'agreement_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un convenio')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Convenio</option>
-        {catalogs.agreements.map(a => (
+        {catalogs.agreements.map((a) => (
           <option key={a.id} value={a.id}>
             {a.code} - {a.description}
           </option>
@@ -212,14 +250,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Licitación</label>
       <select
         name="tender"
-        value={formData.tender}
-        onChange={handleChange}
+        value={data.tender}
+        onChange={(e) => handleSelectChange(e, 'tender', 'tender_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una licitación')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Licitación</option>
-        {catalogs.tenders.map(t => (
+        {catalogs.tenders.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
           </option>
@@ -230,14 +268,14 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Categoría</label>
       <select
         name="category"
-        value={formData.category}
-        onChange={handleChange}
+        value={data.category}
+        onChange={(e) => handleSelectChange(e, 'category', 'category_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una categoría')}
         className="border p-2 w-full rounded"
       >
         <option value="">Seleccione Categoría</option>
-        {catalogs.categories.map(cat => (
+        {catalogs.categories.map((cat) => (
           <option key={cat.id} value={cat.id}>
             {cat.name}
           </option>
@@ -249,7 +287,7 @@ export default function RequisitionForm({ embed = false }) {
       <input
         type="text"
         name="fecha"
-        value={new Date().toLocaleDateString('es-MX')}
+        value={data.fecha}
         readOnly
         required
         onInvalid={(e) => setRequiredMessage(e, 'La fecha es obligatoria')}
@@ -260,7 +298,7 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Motivos Requisición</label>
       <textarea
         name="description"
-        value={formData.description}
+        value={data.description}
         onChange={handleChange}
         required
         onInvalid={(e) => setRequiredMessage(e, 'La descripción es obligatoria')}
@@ -272,7 +310,7 @@ export default function RequisitionForm({ embed = false }) {
       <input
         type="text"
         name="solicitante"
-        value={(user?.first_name || '') + ' ' + (user?.last_name || '')}
+        value={data.solicitante}
         readOnly
         required
         onInvalid={(e) => setRequiredMessage(e, 'El solicitante es obligatorio')}
@@ -283,8 +321,8 @@ export default function RequisitionForm({ embed = false }) {
       <label className="block mb-1 font-medium">Servicio Externo / Académico</label>
       <select
         name="external_service"
-        value={formData.external_service}
-        onChange={handleChange}
+        value={data.external_service}
+        onChange={(e) => handleSelectChange(e, 'external_service', 'external_service_label')}
         required
         onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un servicio')}
         className="border p-2 w-full rounded"
@@ -304,10 +342,7 @@ export default function RequisitionForm({ embed = false }) {
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow space-y-4"
-    >
+    <form onSubmit={handleSubmit} className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow space-y-4">
       <h2 className="text-2xl font-semibold mb-4">Crear Requisición</h2>
       {content}
       <button
