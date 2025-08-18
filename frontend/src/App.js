@@ -8,19 +8,17 @@ import Navbar from "./components/Layout/Navbar";
 import Footer from "./components/Layout/Footer";
 import ToastNotification from "./components/UI/ToastNotification";
 
-import Home from "./pages/Home";
 import About from "./pages/About";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
-import RequisitionList from "./components/Requisitions/RequisitionList";
-import RequisitionForm from "./components/Requisitions/RequisitionForm";
-import RequisitionDetail from "./pages/RequisitionDetail";
-import NotFound from "./pages/NotFound";
 import ChangePassword from "./pages/ChangePassword";
-import PasswordResetRequest from './pages/PasswordResetRequest';
-import RequisitionsListPage from "./pages/RequisitionsList";
-import RequisitionsLayout from './components/Layout/RequisitionsLayout';
-import RequisitionsList from './pages/RequisitionsList';
+import PasswordResetRequest from "./pages/PasswordResetRequest";
+import RequisitionDetail from "./pages/RequisitionDetail";
+
+import RequisitionsLayout from "./components/Layout/RequisitionsLayout";
+import RequisitionsList from "./pages/RequisitionsList";
+// ⬇️ NEW: use the wizard instead of the form directly
+import RequisitionWizard from "./components/Requisitions/RequisitionWizard";
 
 import PrivateRoute from "./routes/PrivateRoute";
 
@@ -28,33 +26,30 @@ function Layout() {
   const location = useLocation();
   const { token } = useContext(AuthContext);
 
-  // Hide Navbar and Footer on login, register, and change-password pages
-  const requisitionsPages = [
-    "/requisitions",
-    "/requisitions/new",
-    // Add more requisition routes if needed
-  ];
+  // Pages where we hide the global Navbar/Footer
+  const requisitionsPages = ["/requisitions", "/requisitions/new"];
   const hideNavbar = ["/login", "/register", "/change-password", ...requisitionsPages].includes(location.pathname);
-
 
   return (
     <div className="flex flex-col min-h-screen">
       {!hideNavbar && <Navbar />}
       <main className="flex-1 p-4">
         <Routes>
-          {/* Redirect from root depending on auth */}
+          {/* Root redirect based on auth */}
           <Route
             path="/"
-            element={
-              token ? <Navigate to="/requisitions" replace /> : <Navigate to="/login" replace />
-            }
+            element={token ? <Navigate to="/requisitions" replace /> : <Navigate to="/login" replace />}
           />
+
+          {/* Public */}
           <Route path="/about" element={<About />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/password-reset-request" element={<PasswordResetRequest />} />
           <Route path="/password-reset-confirm/:uid/:token" element={<ChangePassword />} />
           <Route path="/change-password" element={<ChangePassword />} />
+
+          {/* Requisitions list */}
           <Route
             path="/requisitions"
             element={
@@ -66,41 +61,32 @@ function Layout() {
             }
           />
 
+          {/* Requisition wizard (Step 1–3) */}
           <Route
             path="/requisitions/new"
             element={
               <PrivateRoute>
                 <RequisitionsLayout>
-                  <RequisitionForm />
+                  <RequisitionWizard />
                 </RequisitionsLayout>
               </PrivateRoute>
             }
           />
-          <Route
-            path="/requisitions"
-            element={
-              <PrivateRoute>
-                <RequisitionsListPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/requisitions/new"
-            element={
-              <PrivateRoute>
-                <RequisitionForm />
-              </PrivateRoute>
-            }
-          />
+
+          {/* Requisition detail */}
           <Route
             path="/requisitions/:id"
             element={
               <PrivateRoute>
-                <RequisitionDetail />
+                <RequisitionsLayout>
+                  <RequisitionDetail />
+                </RequisitionsLayout>
               </PrivateRoute>
             }
           />
-          <Route path="*" element={<NotFound />} />
+
+          {/* 404 */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       {!hideNavbar && <Footer />}

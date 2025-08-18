@@ -91,6 +91,7 @@ sistema-adquisiciones/
                     RequisitionCard.jsx
                     RequisitionForm.jsx
                     RequisitionList.jsx
+                    RequisitionWizard.jsx
                 UI/
                     LoadingSpinner.jsx
                     ToastNotification.jsx

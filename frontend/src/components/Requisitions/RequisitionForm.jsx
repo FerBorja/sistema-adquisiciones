@@ -1,16 +1,17 @@
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState, useContext, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/apiClient';
 import LoadingSpinner from '../UI/LoadingSpinner';
 import { useToast } from '../../contexts/ToastContext';
 import { AuthContext } from '../../contexts/AuthContext';
 
-export default function RequisitionForm() {
+export default function RequisitionForm({ embed = false }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { user } = useContext(AuthContext);
 
-  // Catalogs for dropdowns
+  const fetchedCatalogs = useRef(false);
+
   const [catalogs, setCatalogs] = useState({
     projects: [],
     categories: [],
@@ -18,6 +19,7 @@ export default function RequisitionForm() {
     budget_units: [],
     agreements: [],
     tenders: [],
+    external_services: [],
   });
 
   const [formData, setFormData] = useState({
@@ -30,12 +32,19 @@ export default function RequisitionForm() {
     category: '',
     title: '',
     description: '',
-    quantity: 1,
+    external_service: '',
   });
 
   const [loading, setLoading] = useState(false);
 
-  // Prefill department from current user
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      showToast?.('Tu sesión ha expirado. Por favor inicia sesión de nuevo.', 'warning');
+      navigate('/login');
+    }
+  }, [navigate, showToast]);
+
   useEffect(() => {
     if (user?.department) {
       setFormData(prev => ({
@@ -45,23 +54,35 @@ export default function RequisitionForm() {
     }
   }, [user]);
 
-  // Function to set custom required message
   const setRequiredMessage = (e, message) => {
     e.target.setCustomValidity(message);
     e.target.oninput = () => e.target.setCustomValidity('');
   };
 
-  // Fetch catalogs for dropdowns
   useEffect(() => {
-    Promise.all([
-      apiClient.get('/catalogs/projects/'),
-      apiClient.get('/catalogs/categories/'),
-      apiClient.get('/catalogs/funding-sources/'),
-      apiClient.get('/catalogs/budget-units/'),
-      apiClient.get('/catalogs/agreements/'),
-      apiClient.get('/catalogs/tenders/'),
-    ])
-      .then(([projRes, catRes, fundRes, buRes, agreeRes, tenderRes]) => {
+    if (fetchedCatalogs.current) return;
+    fetchedCatalogs.current = true;
+
+    (async () => {
+      try {
+        const [
+          projRes,
+          catRes,
+          fundRes,
+          buRes,
+          agreeRes,
+          tenderRes,
+          extRes,
+        ] = await Promise.all([
+          apiClient.get('/catalogs/projects/'),
+          apiClient.get('/catalogs/categories/'),
+          apiClient.get('/catalogs/funding-sources/'),
+          apiClient.get('/catalogs/budget-units/'),
+          apiClient.get('/catalogs/agreements/'),
+          apiClient.get('/catalogs/tenders/'),
+          apiClient.get('/catalogs/external-services/'),
+        ]);
+
         setCatalogs({
           projects: projRes.data || [],
           categories: catRes.data || [],
@@ -69,13 +90,14 @@ export default function RequisitionForm() {
           budget_units: buRes.data || [],
           agreements: agreeRes.data || [],
           tenders: tenderRes.data || [],
+          external_services: extRes.data || [],
         });
-      })
-      .catch(err => {
+      } catch (err) {
         console.error('Error loading catálogos:', err);
-        showToast('Error al cargar catálogos.', 'error');
-      });
-  }, [showToast]);
+        showToast?.('Error al cargar catálogos.', 'error');
+      }
+    })();
+  }, []);
 
   const handleChange = (e) => {
     setFormData(prev => ({
@@ -90,49 +112,29 @@ export default function RequisitionForm() {
 
     try {
       await apiClient.post('/requisitions/', formData);
-      showToast('Requisición creada correctamente!', 'success');
-
-      setFormData(prev => ({
-        ...prev,
-        project: '',
-        funding_source: '',
-        budget_unit: '',
-        agreement: '',
-        tender: '',
-        category: '',
-        title: '',
-        description: '',
-        quantity: 1,
-      }));
-
+      showToast?.('Requisición creada correctamente!', 'success');
       navigate('/requisitions');
     } catch (err) {
       console.error('Error creating requisition:', err);
-      showToast('Error al crear requisición.', 'error');
+      showToast?.('Error al crear requisición.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow space-y-4"
-    >
-      <h2 className="text-2xl font-semibold mb-4">Crear Requisición</h2>
-
+  const content = (
+    <>
       {/* Department */}
       <label className="block mb-1 font-medium">Departamento</label>
-      <select
+      <input
+        type="text"
         name="department"
         value={formData.department}
-        disabled
-        className="border p-2 w-full rounded bg-gray-100"
-      >
-        <option value={formData.department || ''}>
-          {formData.department || 'No asignado'}
-        </option>
-      </select>
+        readOnly
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'El departamento es obligatorio')}
+        className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
+      />
 
       {/* Project */}
       <label className="block mb-1 font-medium">Proyecto</label>
@@ -242,41 +244,72 @@ export default function RequisitionForm() {
         ))}
       </select>
 
-      {/* Title */}
-      <label className="block mb-1 font-medium">Título</label>
+      {/* Fecha */}
+      <label className="block mb-1 font-medium">Fecha</label>
       <input
         type="text"
-        name="title"
-        value={formData.title}
-        onChange={handleChange}
+        name="fecha"
+        value={new Date().toLocaleDateString('es-MX')}
+        readOnly
         required
-        onInvalid={(e) => setRequiredMessage(e, 'Por favor ingrese el título')}
-        className="border p-2 w-full rounded"
+        onInvalid={(e) => setRequiredMessage(e, 'La fecha es obligatoria')}
+        className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
       />
 
       {/* Description */}
-      <label className="block mb-1 font-medium">Descripción</label>
+      <label className="block mb-1 font-medium">Motivos Requisición</label>
       <textarea
         name="description"
         value={formData.description}
         onChange={handleChange}
-        className="border p-2 w-full rounded"
-      />
-
-      {/* Quantity */}
-      <label className="block mb-1 font-medium">Cantidad</label>
-      <input
-        type="number"
-        name="quantity"
-        value={formData.quantity}
-        onChange={handleChange}
-        min="1"
         required
-        onInvalid={(e) => setRequiredMessage(e, 'Por favor ingrese la cantidad')}
+        onInvalid={(e) => setRequiredMessage(e, 'La descripción es obligatoria')}
         className="border p-2 w-full rounded"
       />
 
-      {/* Submit */}
+      {/* Solicitante */}
+      <label className="block mb-1 font-medium">Solicitante</label>
+      <input
+        type="text"
+        name="solicitante"
+        value={(user?.first_name || '') + ' ' + (user?.last_name || '')}
+        readOnly
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'El solicitante es obligatorio')}
+        className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
+      />
+
+      {/* Servicio Externo / Académico */}
+      <label className="block mb-1 font-medium">Servicio Externo / Académico</label>
+      <select
+        name="external_service"
+        value={formData.external_service}
+        onChange={handleChange}
+        required
+        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione un servicio')}
+        className="border p-2 w-full rounded"
+      >
+        <option value="">Seleccione Servicio</option>
+        {catalogs.external_services.map((svc) => (
+          <option key={svc.id} value={svc.id}>
+            {svc.name}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+
+  if (embed) {
+    return <div className="space-y-4">{content}</div>;
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow space-y-4"
+    >
+      <h2 className="text-2xl font-semibold mb-4">Crear Requisición</h2>
+      {content}
       <button
         type="submit"
         disabled={loading}
