@@ -1,20 +1,20 @@
-from rest_framework import viewsets, permissions
-from rest_framework.permissions import AllowAny
+from rest_framework import viewsets, permissions, filters
+from django_filters.rest_framework import DjangoFilterBackend
 from requisitions.models import (
     Department, Project, FundingSource, BudgetUnit,
     Agreement, Category, Tender, ExternalService,
-    UnitOfMeasurement, Product
+    UnitOfMeasurement, Product, ItemDescription
 )
 from .serializers import (
     DepartmentSerializer, ProjectSerializer, FundingSourceSerializer, BudgetUnitSerializer,
     AgreementSerializer, CategorySerializer, TenderSerializer, ExternalServiceSerializer,
-    UnitOfMeasurementSerializer, ProductSerializer
+    UnitOfMeasurementSerializer, ProductSerializer, ItemDescriptionSerializer
 )
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
@@ -60,3 +60,12 @@ class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all().order_by('description')
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+class ItemDescriptionViewSet(viewsets.ModelViewSet):
+    queryset = ItemDescription.objects.all().order_by('text')
+    serializer_class = ItemDescriptionSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['product']       # <-- filter by product
+    search_fields = ['text']
+    ordering_fields = ['text', 'id']

@@ -2,7 +2,7 @@ from rest_framework import serializers
 from requisitions.models import (
     Department, Project, FundingSource, BudgetUnit,
     Agreement, Category, Tender, ExternalService,
-    UnitOfMeasurement, Product
+    UnitOfMeasurement, Product, ItemDescription
 )
 
 class DepartmentSerializer(serializers.ModelSerializer):
@@ -62,5 +62,16 @@ class UnitOfMeasurementSerializer(serializers.ModelSerializer):
 class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        # Explicit to be crystal clear post-change:
         fields = ['id', 'description']
+
+
+class ItemDescriptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ItemDescription
+        fields = ['id', 'product', 'text']  # <-- include product
+
+    def validate_text(self, v):
+        v = ' '.join((v or '').split())
+        if not v:
+            raise serializers.ValidationError('Este campo no puede estar vacío.')
+        return v

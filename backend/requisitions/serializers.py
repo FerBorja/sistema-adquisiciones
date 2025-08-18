@@ -7,7 +7,6 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'requisition']
 
-
 class RequisitionSerializer(serializers.ModelSerializer):
     items = RequisitionItemSerializer(many=True, required=False)
 
@@ -26,31 +25,24 @@ class RequisitionSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
-
-        # Update requisition fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
-
-        # Optional nested update logic
         if items_data is not None:
-            existing_items = {item.id: item for item in instance.items.all()}
-            sent_item_ids = []
-
-            for item_data in items_data:
-                item_id = item_data.get('id', None)
-                if item_id and item_id in existing_items:
-                    item = existing_items[item_id]
-                    for attr, value in item_data.items():
-                        if attr != 'id':
-                            setattr(item, attr, value)
-                    item.save()
-                    sent_item_ids.append(item_id)
+            existing = {it.id: it for it in instance.items.all()}
+            sent_ids = []
+            for row in items_data:
+                iid = row.get('id')
+                if iid and iid in existing:
+                    it = existing[iid]
+                    for a, v in row.items():
+                        if a != 'id':
+                            setattr(it, a, v)
+                    it.save()
+                    sent_ids.append(iid)
                 else:
-                    RequisitionItem.objects.create(requisition=instance, **item_data)
-
-            for item_id, item in existing_items.items():
-                if item_id not in sent_item_ids:
-                    item.delete()
-
+                    RequisitionItem.objects.create(requisition=instance, **row)
+            for iid, it in existing.items():
+                if iid not in sent_ids:
+                    it.delete()
         return instance

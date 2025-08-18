@@ -41,7 +41,8 @@ export default function RequisitionWizard() {
     setFormData((prev) => ({
       ...prev,
       department: user?.department || prev.department,
-      solicitante: ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim() || prev.solicitante,
+      solicitante:
+        ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim() || prev.solicitante,
     }));
   }, [user]);
 
@@ -75,6 +76,8 @@ export default function RequisitionWizard() {
     setItems([]);
     setRequisitionNumber('');
     tempNumberFetched.current = false;
+    // reset dependent descriptions
+    setDescOptions([]);
   };
 
   const handleNextFromStep1 = () => {
@@ -86,9 +89,10 @@ export default function RequisitionWizard() {
   // ============================
   // STEP 2: Registro de Partidas
   // ============================
-  // Catalogs: Products (Objeto del Gasto) & Units (Unidad de Medida)
+  // Catalogs: Products (Objeto del Gasto) & Units (Unidad de Medida) & Item Descriptions (dependent)
   const [products, setProducts] = useState([]);
   const [units, setUnits] = useState([]);
+  const [descOptions, setDescOptions] = useState([]); // depends on selected product
   const catalogsFetched = useRef(false);
 
   useEffect(() => {
@@ -117,7 +121,7 @@ export default function RequisitionWizard() {
         '/catalogs/products/',
         '/products/',
         '/catalogs/items/',
-        '/catalogs/expense-objects/', // last resort if your "product" is stored as expense-objects
+        '/catalogs/expense-objects/',
       ]);
       setProducts(prodArr.map(p => ({ id: p.id, label: labelOf(p) })));
 
@@ -137,6 +141,26 @@ export default function RequisitionWizard() {
     }
   }, [step]);
 
+  // Load item descriptions filtered by product
+  const loadDescriptionsByProduct = async (productId) => {
+    if (!productId) {
+      setDescOptions([]);
+      return;
+    }
+    try {
+      const res = await apiClient.get(`/catalogs/item-descriptions/?product=${productId}`);
+      const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
+      const options = arr
+        .map((d) => ({ id: d.id, label: d.text }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+      setDescOptions(options);
+    } catch (e) {
+      console.error('Error loading item-descriptions by product:', e);
+      showToast?.('Error al cargar descripciones para el producto.', 'error');
+      setDescOptions([]);
+    }
+  };
+
   // Items state
   const [items, setItems] = useState([]);
   const [newItem, setNewItem] = useState({
@@ -145,7 +169,8 @@ export default function RequisitionWizard() {
     quantity: '',
     unit: '',              // id
     unit_label: '',        // display
-    description: '',
+    description: '',       // id from item-descriptions
+    description_label: '', // display
   });
 
   const addItem = () => {
@@ -154,7 +179,7 @@ export default function RequisitionWizard() {
     if (!newItem.product) return showToast('Selecciona el Objeto del Gasto (Producto).', 'error');
     if (!Number.isFinite(qty) || qty <= 0) return showToast('La cantidad debe ser mayor que 0.', 'error');
     if (!newItem.unit) return showToast('Selecciona la Unidad de Medida.', 'error');
-    if (!newItem.description.trim()) return showToast('La descripción es obligatoria.', 'error');
+    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error'); // now required dropdown
 
     const partida = {
       id: Date.now(),
@@ -163,10 +188,18 @@ export default function RequisitionWizard() {
       quantity: qty,
       unit: newItem.unit,
       unit_label: newItem.unit_label,
-      description: newItem.description.trim(),
+      description: newItem.description,             // send id to backend
+      description_label: newItem.description_label, // show label in UI
     };
     setItems((prev) => [...prev, partida]);
-    setNewItem({ product: '', product_label: '', quantity: '', unit: '', unit_label: '', description: '' });
+    setNewItem({
+      product: '', product_label: '',
+      quantity: '',
+      unit: '', unit_label: '',
+      description: '', description_label: '',
+    });
+    // reset dependent options after add (optional)
+    setDescOptions([]);
   };
 
   const removeItem = (id) => setItems((prev) => prev.filter((p) => p.id !== id));
@@ -202,7 +235,7 @@ export default function RequisitionWizard() {
               last = candidate;
               break;
             }
-          } catch {/* try next */}
+          } catch { /* try next */ }
         }
         const next = (last ?? 0) + 1;
         setRequisitionNumber(String(next));
@@ -245,11 +278,11 @@ export default function RequisitionWizard() {
       description: formData.description,
       external_service: formData.external_service,
       // items mapped to DB keys
-      items: items.map(({ id, product, quantity, unit, description }) => ({
+      items: items.map(({ product, quantity, unit, description }) => ({
         product,
         quantity,
         unit,
-        description,
+        description, // FK id for ItemDescription
       })),
       // client-only meta
       meta: {
@@ -331,7 +364,15 @@ export default function RequisitionWizard() {
                 onChange={(e) => {
                   const id = e.target.value;
                   const label = e.target.options[e.target.selectedIndex]?.text || '';
-                  setNewItem((p) => ({ ...p, product: id, product_label: label }));
+                  setNewItem((p) => ({
+                    ...p,
+                    product: id,
+                    product_label: label,
+                    // reset dependent description
+                    description: '',
+                    description_label: '',
+                  }));
+                  loadDescriptionsByProduct(id);
                 }}
                 className="border p-2 w-full rounded"
               >
@@ -374,15 +415,24 @@ export default function RequisitionWizard() {
               </select>
             </div>
 
-            {/* 4) Descripción */}
+            {/* 4) Descripción (dependent catalog) */}
             <div className="md:col-span-3">
               <label className="block mb-1 font-medium">Descripción</label>
-              <input
-                type="text"
+              <select
                 value={newItem.description}
-                onChange={(e) => setNewItem((p) => ({ ...p, description: e.target.value }))}
-                className="border p-2 w-full rounded"
-              />
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const label = e.target.options[e.target.selectedIndex]?.text || '';
+                  setNewItem((p) => ({ ...p, description: id, description_label: label }));
+                }}
+                disabled={!newItem.product} // disable until a product is selected
+                className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
+                {descOptions.map((d) => (
+                  <option key={d.id} value={d.id}>{d.label}</option>
+                ))}
+              </select>
             </div>
 
             {/* Add button */}
@@ -424,7 +474,7 @@ export default function RequisitionWizard() {
                     <td className="p-2 border">{p.product_label}</td>
                     <td className="p-2 border">{p.quantity}</td>
                     <td className="p-2 border">{p.unit_label}</td>
-                    <td className="p-2 border">{p.description}</td>
+                    <td className="p-2 border">{p.description_label}</td>
                     <td className="p-2 border">
                       <button
                         type="button"

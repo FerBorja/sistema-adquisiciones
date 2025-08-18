@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.db.models.functions import Lower
 
 User = settings.AUTH_USER_MODEL
 
@@ -73,12 +74,26 @@ class UnitOfMeasurement(models.Model):
 
 
 class Product(models.Model):
-    # ⬇️ DECOUPLED: Product no longer depends on Category (or any other FK).
-    # It is just the text catalog that feeds "Objeto del Gasto".
+    # Catálogo de textos que alimenta "Objeto del Gasto"
     description = models.CharField(max_length=255, unique=True)
 
     def __str__(self):
         return self.description
+
+
+class ItemDescription(models.Model):
+    product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='descriptions')
+    text = models.CharField(max_length=255)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower('text'), 'product', name='uniq_itemdesc_product_text_ci'
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.product.description} – {self.text}"
 
 
 class Requisition(models.Model):
@@ -112,10 +127,9 @@ class Requisition(models.Model):
     class Meta:
         verbose_name = "Requisition"
         verbose_name_plural = "Requisitions"
-        ordering = ['-created_at']  # default ordering
+        ordering = ['-created_at']
 
     def __str__(self):
-        # Adjust if your User model has a different display field than `full_name`
         return f"Req #{self.id} by {getattr(self.user, 'full_name', self.user)}"
 
 
@@ -124,11 +138,12 @@ class RequisitionItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)  # "Objeto del Gasto"
     quantity = models.PositiveIntegerField()
     unit = models.ForeignKey(UnitOfMeasurement, on_delete=models.PROTECT)
-    description = models.CharField(max_length=255)  # Free text added by the requester
+    # AHORA: 'description' es FK al nuevo catálogo ItemDescription
+    description = models.ForeignKey(ItemDescription, on_delete=models.PROTECT)
 
     class Meta:
         verbose_name = "Requisition Item"
         verbose_name_plural = "Requisition Items"
 
     def __str__(self):
-        return f"{self.product.description} ({self.quantity} {self.unit.name})"
+        return f"{self.product.description} ({self.quantity} {self.unit.name}) - {self.description.text}"
