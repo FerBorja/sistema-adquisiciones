@@ -1,4 +1,3 @@
-from django.shortcuts import render
 from rest_framework import viewsets, permissions, status, filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import PageNumberPagination
@@ -24,7 +23,8 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
 
     filterset_fields = ['status', 'requesting_department', 'project', 'created_at']
-    ordering_fields = ['created_at', 'status']
+    # ⬇️ Allow ordering by id so the frontend can easily fetch the newest
+    ordering_fields = ['id', 'created_at', 'status']
     search_fields = ['requisition_reason']
 
     def get_queryset(self):

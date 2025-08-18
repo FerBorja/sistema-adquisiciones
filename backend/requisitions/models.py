@@ -3,12 +3,14 @@ from django.conf import settings
 
 User = settings.AUTH_USER_MODEL
 
+
 class Department(models.Model):
     code = models.CharField(max_length=10, unique=True)
     name = models.CharField(max_length=150)
 
     def __str__(self):
         return f"{self.code} – {self.name}"
+
 
 class Project(models.Model):
     code = models.CharField(max_length=50, unique=True)
@@ -17,12 +19,14 @@ class Project(models.Model):
     def __str__(self):
         return f"{self.code} – {self.description}"
 
+
 class FundingSource(models.Model):
     code = models.CharField(max_length=50, unique=True)
     description = models.CharField(max_length=255)
 
     def __str__(self):
         return f"{self.code} – {self.description}"
+
 
 class BudgetUnit(models.Model):
     code = models.CharField(max_length=50, unique=True)
@@ -31,6 +35,7 @@ class BudgetUnit(models.Model):
     def __str__(self):
         return f"{self.code} – {self.description}"
 
+
 class Agreement(models.Model):
     code = models.CharField(max_length=50, unique=True)
     description = models.CharField(max_length=255)
@@ -38,11 +43,13 @@ class Agreement(models.Model):
     def __str__(self):
         return f"{self.code} – {self.description}"
 
+
 class Category(models.Model):
     name = models.CharField(max_length=100)
 
     def __str__(self):
         return self.name
+
 
 class Tender(models.Model):
     name = models.CharField(max_length=100)
@@ -50,11 +57,13 @@ class Tender(models.Model):
     def __str__(self):
         return self.name
 
+
 class ExternalService(models.Model):
     name = models.CharField(max_length=100)
 
     def __str__(self):
         return self.name
+
 
 class UnitOfMeasurement(models.Model):
     name = models.CharField(max_length=50)
@@ -62,12 +71,15 @@ class UnitOfMeasurement(models.Model):
     def __str__(self):
         return self.name
 
+
 class Product(models.Model):
-    expense_object = models.ForeignKey(Category, on_delete=models.CASCADE)
-    description = models.CharField(max_length=255)
+    # ⬇️ DECOUPLED: Product no longer depends on Category (or any other FK).
+    # It is just the text catalog that feeds "Objeto del Gasto".
+    description = models.CharField(max_length=255, unique=True)
 
     def __str__(self):
         return self.description
+
 
 class Requisition(models.Model):
     STATUS_CHOICES = (
@@ -80,7 +92,11 @@ class Requisition(models.Model):
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    administrative_unit = models.CharField(max_length=255, default="4400 FACULTAD DE INGENIERIA", editable=False)
+    administrative_unit = models.CharField(
+        max_length=255,
+        default="4400 FACULTAD DE INGENIERIA",
+        editable=False
+    )
     requesting_department = models.ForeignKey(Department, on_delete=models.PROTECT)
     project = models.ForeignKey(Project, on_delete=models.PROTECT)
     funding_source = models.ForeignKey(FundingSource, on_delete=models.PROTECT)
@@ -96,17 +112,19 @@ class Requisition(models.Model):
     class Meta:
         verbose_name = "Requisition"
         verbose_name_plural = "Requisitions"
-        ordering = ['-created_at']
+        ordering = ['-created_at']  # default ordering
 
     def __str__(self):
-        return f"Req #{self.id} by {self.user.full_name}"
+        # Adjust if your User model has a different display field than `full_name`
+        return f"Req #{self.id} by {getattr(self.user, 'full_name', self.user)}"
+
 
 class RequisitionItem(models.Model):
     requisition = models.ForeignKey(Requisition, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)  # "Objeto del Gasto"
     quantity = models.PositiveIntegerField()
     unit = models.ForeignKey(UnitOfMeasurement, on_delete=models.PROTECT)
-    description = models.CharField(max_length=255)  # Can be product description or additional info
+    description = models.CharField(max_length=255)  # Free text added by the requester
 
     class Meta:
         verbose_name = "Requisition Item"

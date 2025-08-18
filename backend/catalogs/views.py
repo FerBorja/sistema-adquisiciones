@@ -57,6 +57,6 @@ class UnitOfMeasurementViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.all()
+    queryset = Product.objects.all().order_by('description')
     serializer_class = ProductSerializer
     permission_classes = [permissions.IsAuthenticated]

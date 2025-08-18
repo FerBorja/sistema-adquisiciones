@@ -7,6 +7,7 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'requisition']
 
+
 class RequisitionSerializer(serializers.ModelSerializer):
     items = RequisitionItemSerializer(many=True, required=False)
 
@@ -31,15 +32,14 @@ class RequisitionSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
+        # Optional nested update logic
         if items_data is not None:
-            # Map existing items by id for quick lookup
             existing_items = {item.id: item for item in instance.items.all()}
             sent_item_ids = []
 
             for item_data in items_data:
                 item_id = item_data.get('id', None)
                 if item_id and item_id in existing_items:
-                    # Update existing item
                     item = existing_items[item_id]
                     for attr, value in item_data.items():
                         if attr != 'id':
@@ -47,10 +47,8 @@ class RequisitionSerializer(serializers.ModelSerializer):
                     item.save()
                     sent_item_ids.append(item_id)
                 else:
-                    # Create new item linked to requisition
                     RequisitionItem.objects.create(requisition=instance, **item_data)
 
-            # Delete any existing items not sent in update request
             for item_id, item in existing_items.items():
                 if item_id not in sent_item_ids:
                     item.delete()
