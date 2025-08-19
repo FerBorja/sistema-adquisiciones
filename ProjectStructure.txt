@@ -68,8 +68,10 @@ sistema-adquisiciones/
     frontend/
         node_modules/
         public/
+            docs/
+              clasificador.pdf
             images/
-                uach_logo.png
+              uach_logo.png
             favicon.ico
             index.html
             logo192.png
