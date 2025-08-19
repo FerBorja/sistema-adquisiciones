@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState, useContext } from 'react';
+// frontend/src/components/Requisitions/RequisitionItems.jsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import apiClient from '../../api/apiClient';
 import { useToast } from '../../contexts/ToastContext';
 
@@ -14,10 +15,9 @@ export default function RequisitionItems({
   // ============================
   // STEP 2: Registro de Partidas
   // ============================
-  // Catalogs: Products (Objeto del Gasto) & Units (Unidad de Medida) & Item Descriptions (dependent)
   const [products, setProducts] = useState([]);
   const [units, setUnits] = useState([]);
-  const [descOptions, setDescOptions] = useState([]); // depends on selected product
+  const [descOptions, setDescOptions] = useState([]);
   const catalogsFetched = useRef(false);
 
   useEffect(() => {
@@ -33,15 +33,12 @@ export default function RequisitionItems({
           const res = await apiClient.get(url);
           const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
           if (arr.length) return arr;
-        } catch {
-          // try next
-        }
+        } catch { /* try next */ }
       }
       return [];
     };
 
     const fetchCatalogs = async () => {
-      // Products
       const prodArr = await tryGet([
         '/catalogs/products/',
         '/products/',
@@ -50,7 +47,6 @@ export default function RequisitionItems({
       ]);
       setProducts(prodArr.map(p => ({ id: p.id, label: labelOf(p) })));
 
-      // Units
       const unitArr = await tryGet([
         '/catalogs/units/',
         '/catalogs/measurement-units/',
@@ -66,14 +62,12 @@ export default function RequisitionItems({
     }
   }, []);
 
-  // Map product id -> label (for catalog popup)
   const productLabelById = useMemo(() => {
     const map = new Map();
     products.forEach(p => map.set(String(p.id), p.label));
     return map;
   }, [products]);
 
-  // Load item descriptions filtered by product
   const loadDescriptionsByProduct = async (productId) => {
     if (!productId) {
       setDescOptions([]);
@@ -93,15 +87,14 @@ export default function RequisitionItems({
     }
   };
 
-  // Items editor state (new row)
   const [newItem, setNewItem] = useState({
-    product: '',           // id
-    product_label: '',     // display
+    product: '',
+    product_label: '',
     quantity: '',
-    unit: '',              // id
-    unit_label: '',        // display
-    description: '',       // id from item-descriptions
-    description_label: '', // display
+    unit: '',
+    unit_label: '',
+    description: '',
+    description_label: '',
   });
 
   const addItem = () => {
@@ -110,7 +103,7 @@ export default function RequisitionItems({
     if (!newItem.product) return showToast('Selecciona el Objeto del Gasto (Producto).', 'error');
     if (!Number.isFinite(qty) || qty <= 0) return showToast('La cantidad debe ser mayor que 0.', 'error');
     if (!newItem.unit) return showToast('Selecciona la Unidad de Medida.', 'error');
-    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error'); // required dropdown
+    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
 
     const partida = {
       id: Date.now(),
@@ -119,8 +112,8 @@ export default function RequisitionItems({
       quantity: qty,
       unit: newItem.unit,
       unit_label: newItem.unit_label,
-      description: newItem.description,             // send id to backend
-      description_label: newItem.description_label, // show label in UI
+      description: newItem.description,
+      description_label: newItem.description_label,
     };
     setItems((prev) => [...prev, partida]);
     setNewItem({
@@ -160,10 +153,7 @@ export default function RequisitionItems({
           try {
             const res = await apiClient.get(url);
             const candidate = extractLastNumber(res.data);
-            if (candidate !== null) {
-              last = candidate;
-              break;
-            }
+            if (candidate !== null) { last = candidate; break; }
           } catch { /* try next */ }
         }
         const next = (last ?? 0) + 1;
@@ -180,9 +170,9 @@ export default function RequisitionItems({
     }
   }, [setRequisitionNumber]);
 
-  // =========================================
-  // REGISTRO MODAL (add new Item Description)
-  // =========================================
+  // ================
+  // Registro modal
+  // ================
   const [showRegistroModal, setShowRegistroModal] = useState(false);
   const [regProductId, setRegProductId] = useState('');
   const [regDescripcion, setRegDescripcion] = useState('');
@@ -197,7 +187,6 @@ export default function RequisitionItems({
   const openRegistro = () => {
     setRegError(null);
     setShowRegistroModal(true);
-    // Preselect currently chosen product (if any) to speed up entry
     if (newItem.product) setRegProductId(newItem.product);
   };
 
@@ -214,34 +203,24 @@ export default function RequisitionItems({
       try {
         const res = await apiClient.post(url, payload);
         return res.data;
-      } catch (e) {
-        // try next
-      }
+      } catch { /* try next */ }
     }
     throw new Error('No se pudo registrar con los endpoints conocidos.');
   };
 
   const submitRegistro = async () => {
     setRegError(null);
-
-    if (!regProductId) {
-      setRegError("Selecciona un 'Objeto del Gasto'.");
-      return;
-    }
-    if (!regDescripcion.trim()) {
-      setRegError("La 'Descripción del Producto' no puede estar vacía.");
-      return;
-    }
+    if (!regProductId) return setRegError("Selecciona un 'Objeto del Gasto'.");
+    if (!regDescripcion.trim()) return setRegError("La 'Descripción del Producto' no puede estar vacía.");
 
     try {
       setRegSaving(true);
 
-      const payloadCandidates = [
+      const payloads = [
         { product: regProductId, text: regDescripcion.trim() },
         { product_id: regProductId, text: regDescripcion.trim() },
         { producto: regProductId, descripcion: regDescripcion.trim() },
       ];
-
       const endpoints = [
         '/catalogs/item-descriptions/',
         '/item-descriptions/',
@@ -249,30 +228,20 @@ export default function RequisitionItems({
       ];
 
       let created = null;
-      for (const p of payloadCandidates) {
+      for (const p of payloads) {
         try {
           created = await tryPost(endpoints, p);
           if (created) break;
-        } catch {
-          // try next payload shape
-        }
+        } catch { /* next payload */ }
       }
-
       if (!created) throw new Error('No se pudo crear la descripción.');
 
-      // Normalize created object
       const createdId = created.id ?? created.pk ?? created.uuid ?? null;
       const createdText = created.text ?? created.descripcion ?? created.name ?? created.label ?? regDescripcion.trim();
 
-      // If modal product matches current selected product, refresh list and preselect new one.
       await loadDescriptionsByProduct(regProductId);
-
       if (newItem.product === regProductId && createdId) {
-        setNewItem((p) => ({
-          ...p,
-          description: String(createdId),
-          description_label: createdText,
-        }));
+        setNewItem((p) => ({ ...p, description: String(createdId), description_label: createdText }));
       }
 
       showToast?.('Descripción registrada correctamente.', 'success');
@@ -285,19 +254,17 @@ export default function RequisitionItems({
     }
   };
 
-  // =====================================
-  // CATÁLOGO MODAL (browse descriptions)
-  // =====================================
+  // ================
+  // Catálogo modal
+  // ================
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(null);
-  const [catalogRows, setCatalogRows] = useState([]); // {id, productId, productLabel, text}
+  const [catalogRows, setCatalogRows] = useState([]);
 
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
-
-  const perPageOptions = [10, 25, 50, 100];
 
   const openCatalog = async () => {
     setShowCatalogModal(true);
@@ -319,18 +286,11 @@ export default function RequisitionItems({
         try {
           const res = await apiClient.get(url);
           const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
-          if (arr.length) {
-            data = arr;
-            break;
-          }
-        } catch {
-          // try next
-        }
+          if (arr.length) { data = arr; break; }
+        } catch { /* try next */ }
       }
-
       if (!data) data = [];
 
-      // Normalize to {id, productId, productLabel, text}
       const normalized = data.map((d) => {
         const productId = String(d.product ?? d.product_id ?? d.producto ?? d.producto_id ?? '');
         const text = d.text ?? d.descripcion ?? d.name ?? d.label ?? '';
@@ -350,7 +310,7 @@ export default function RequisitionItems({
   const closeCatalog = () => {
     setShowCatalogModal(false);
     setCatalogRows([]);
-    setSearchQuery('');
+       setSearchQuery('');
     setCatalogError(null);
     setCatalogLoading(false);
     setPage(1);
@@ -377,20 +337,15 @@ export default function RequisitionItems({
     setPage(p);
   };
 
-  // Build condensed page list: 1 … x-1 x x+1 … N
   const pageList = useMemo(() => {
     const pages = [];
     const N = totalPages;
     const windowSize = 1;
-    if (N <= 7) {
-      for (let i = 1; i <= N; i++) pages.push(i);
-      return pages;
-    }
-    const add = (val) => pages.push(val);
+    if (N <= 7) { for (let i = 1; i <= N; i++) pages.push(i); return pages; }
+    const add = (v) => pages.push(v);
     add(1);
     const left = Math.max(2, currentPage - windowSize);
     const right = Math.min(N - 1, currentPage + windowSize);
-
     if (left > 2) add('…');
     for (let i = left; i <= right; i++) add(i);
     if (right < N - 1) add('…');
@@ -406,7 +361,7 @@ export default function RequisitionItems({
         </h2>
       </div>
 
-      <h3 className="text-lg font-semibold mb-3">Resumen del Paso 1</h3>
+      <h3 className="text-lg font-semibold mb-3">Resumen</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
         <div><div className="text-sm text-gray-500">Departamento</div><div className="font-medium">{formData.department}</div></div>
         <div><div className="text-sm text-gray-500">Proyecto</div><div className="font-medium">{formData.project_label || formData.project}</div></div>
@@ -420,6 +375,9 @@ export default function RequisitionItems({
         <div><div className="text-sm text-gray-500">Solicitante</div><div className="font-medium">{formData.solicitante}</div></div>
         <div><div className="text-sm text-gray-500">Servicio Externo / Académico</div><div className="font-medium">{formData.external_service_label || formData.external_service}</div></div>
       </div>
+
+      {/* Separation line */}
+      <div className="my-6 border-t border-gray-200" />
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
 
@@ -437,7 +395,6 @@ export default function RequisitionItems({
                 ...p,
                 product: id,
                 product_label: label,
-                // reset dependent description
                 description: '',
                 description_label: '',
               }));
@@ -452,7 +409,7 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        {/* 2) Cantidad (Quantity) */}
+        {/* 2) Cantidad */}
         <div className="md:col-span-2">
           <label className="block mb-1 font-medium">Cantidad</label>
           <input
@@ -465,7 +422,7 @@ export default function RequisitionItems({
           />
         </div>
 
-        {/* 3) Unidad de Medida (Unit) */}
+        {/* 3) Unidad de Medida */}
         <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Unidad de Medida</label>
           <select
@@ -484,7 +441,7 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        {/* 4) Descripción (dependent catalog) */}
+        {/* 4) Descripción */}
         <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Descripción</label>
           <select
@@ -494,7 +451,7 @@ export default function RequisitionItems({
               const label = e.target.options[e.target.selectedIndex]?.text || '';
               setNewItem((p) => ({ ...p, description: id, description_label: label }));
             }}
-            disabled={!newItem.product} // disable until a product is selected
+            disabled={!newItem.product}
             className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
@@ -503,23 +460,10 @@ export default function RequisitionItems({
             ))}
           </select>
         </div>
-
-        {/* Add button */}
-        <div className="md:col-span-12 flex justify-end">
-          <button
-            type="button"
-            onClick={addItem}
-            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded"
-          >
-            Agregar
-          </button>
-        </div>
       </div>
 
-      {/* Header with Clasificador + Ver Catálogo + Registrar (right side) */}
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Registro de Partidas</h2>
-
+      {/* Header with Clasificador + Ver Catálogo + Registrar + Agregar */}
+      <div className="flex items-center justify-end mb-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -547,8 +491,22 @@ export default function RequisitionItems({
           >
             Registrar
           </button>
+
+          <button
+            type="button"
+            onClick={addItem}
+            className="inline-flex items-center gap-2 rounded-md border border-green-300 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50"
+            title="Agregar partida"
+          >
+            Agregar
+          </button>
         </div>
       </div>
+
+      {/* Separation line */}
+      <div className="my-4 border-t border-gray-200" />
+
+      <h2 className="text-lg font-semibold mb-3">Partidas registradas</h2>
 
       {/* Items table */}
       <div className="overflow-x-auto">
@@ -600,25 +558,15 @@ export default function RequisitionItems({
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Siguiente</button>
       </div>
 
-      {/* =========================
-          Modal: Registro (popup)
-          ========================= */}
+      {/* Modal: Registro */}
       {showRegistroModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={closeRegistro}
-            aria-hidden="true"
-          />
-
-          {/* Modal */}
+          <div className="absolute inset-0 bg-black/40" onClick={closeRegistro} aria-hidden="true" />
           <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
             <div className="mb-4">
               <h3 className="text-lg font-semibold">Registro</h3>
             </div>
 
-            {/* Objeto del Gasto */}
             <label className="block text-sm font-medium mb-1">Objeto del Gasto</label>
             <select
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-300"
@@ -631,10 +579,7 @@ export default function RequisitionItems({
               ))}
             </select>
 
-            {/* Descripción del Producto */}
-            <label className="block text-sm font-medium mb-1">
-              Descripción del Producto
-            </label>
+            <label className="block text-sm font-medium mb-1">Descripción del Producto</label>
             <input
               type="text"
               placeholder="Ej. Laptop 14” Core i5, 16GB RAM…"
@@ -643,162 +588,125 @@ export default function RequisitionItems({
               onChange={(e) => setRegDescripcion(e.target.value)}
             />
 
-            {/* Errors on save */}
-            {regError && (
-              <div className="text-sm text-red-600 mb-3">{regError}</div>
-            )}
+            {regError && <div className="text-sm text-red-600 mb-3">{regError}</div>}
 
-            {/* Actions */}
             <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={closeRegistro}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-              >
-                Cerrar
-              </button>
-              <button
-                type="button"
-                disabled={regSaving}
-                onClick={submitRegistro}
-                className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
-              >
-                {regSaving ? "Registrando…" : "Registrar"}
+              <button type="button" onClick={closeRegistro}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Cerrar</button>
+              <button type="button" disabled={regSaving} onClick={submitRegistro}
+                className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                {regSaving ? 'Registrando…' : 'Registrar'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ==========================
-          Modal: Catálogo (popup)
-          ========================== */}
+      {/* Modal: Catálogo */}
       {showCatalogModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={closeCatalog}
-            aria-hidden="true"
-          />
-
-        {/* Modal */}
-        <div className="relative z-10 w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Catálogo</h3>
-          </div>
-
-          {/* Controls */}
-          <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm">Mostrar</span>
-              <select
-                value={entriesPerPage}
-                onChange={(e) => { setEntriesPerPage(Number(e.target.value)); setPage(1); }}
-                className="border rounded px-2 py-1 text-sm"
-              >
-                {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-              <span className="text-sm">entradas</span>
+          <div className="absolute inset-0 bg-black/40" onClick={closeCatalog} aria-hidden="true" />
+          <div className="relative z-10 w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">Catálogo</h3>
             </div>
 
-            <div className="flex items-center gap-2">
-              <label className="text-sm">Search</label>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                className="border rounded px-2 py-1 text-sm w-64"
-                placeholder="Buscar por Objeto del Gasto o Descripción…"
-              />
-            </div>
-          </div>
+            <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">Mostrar</span>
+                <select
+                  value={entriesPerPage}
+                  onChange={(e) => { setEntriesPerPage(Number(e.target.value)); setPage(1); }}
+                  className="border rounded px-2 py-1 text-sm"
+                >
+                  {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span className="text-sm">entradas</span>
+              </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto border rounded">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-100 text-left">
-                  <th className="p-2 border">Objeto del Gasto</th>
-                  <th className="p-2 border">Descripción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {catalogLoading && (
-                  <tr>
-                    <td colSpan="2" className="p-3 text-center text-gray-500">Cargando…</td>
+              <div className="flex items-center gap-2">
+                <label className="text-sm">Search</label>
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+                  className="border rounded px-2 py-1 text-sm w-64"
+                  placeholder="Buscar por Objeto del Gasto o Descripción…"
+                />
+              </div>
+            </div>
+
+            <div className="overflow-x-auto border rounded">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-100 text-left">
+                    <th className="p-2 border">Objeto del Gasto</th>
+                    <th className="p-2 border">Descripción</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {catalogLoading && (
+                    <tr><td colSpan="2" className="p-3 text-center text-gray-500">Cargando…</td></tr>
+                  )}
+                  {!catalogLoading && pageRows.length === 0 && (
+                    <tr><td colSpan="2" className="p-3 text-center text-gray-500">Sin resultados.</td></tr>
+                  )}
+                  {pageRows.map((r) => (
+                    <tr key={`${r.id}`}>
+                      <td className="p-2 border">{r.productLabel}</td>
+                      <td className="p-2 border">{r.text}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="text-sm text-gray-600">
+                {totalEntries > 0
+                  ? <>Mostrando {startIndex + 1} de {entriesPerPage} de {totalEntries} entradas totales</>
+                  : <>Mostrando 0 de {entriesPerPage} de 0 entradas totales</>}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  className="px-2 py-1 text-sm border rounded disabled:opacity-50"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                >
+                  Anterior
+                </button>
+
+                {pageList.map((p, idx) =>
+                  typeof p === 'number' ? (
+                    <button
+                      key={`p-${p}-${idx}`}
+                      className={`px-2 py-1 text-sm border rounded ${p === currentPage ? 'bg-blue-600 text-white border-blue-600' : ''}`}
+                      onClick={() => goToPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ) : (
+                    <span key={`dots-${idx}`} className="px-2 py-1 text-sm">…</span>
+                  )
                 )}
-                {(!catalogLoading && pageRows.length === 0) && (
-                  <tr>
-                    <td colSpan="2" className="p-3 text-center text-gray-500">Sin resultados.</td>
-                  </tr>
-                )}
-                {pageRows.map((r) => (
-                  <tr key={`${r.id}`}>
-                    <td className="p-2 border">{r.productLabel}</td>
-                    <td className="p-2 border">{r.text}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
 
-          {/* Footer: left info + right pagination */}
-          <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="text-sm text-gray-600">
-              {totalEntries > 0 ? (
-                <>Mostrando {startIndex + 1} de {entriesPerPage} de {totalEntries} entradas totales</>
-              ) : (
-                <>Mostrando 0 de {entriesPerPage} de 0 entradas totales</>
-              )}
+                <button
+                  className="px-2 py-1 text-sm border rounded disabled:opacity-50"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                >
+                  Siguiente
+                </button>
+              </div>
             </div>
 
-            {/* Pagination */}
-            <div className="flex items-center gap-1">
-              <button
-                className="px-2 py-1 text-sm border rounded disabled:opacity-50"
-                onClick={() => goToPage(currentPage - 1)}
-                disabled={currentPage <= 1}
-              >
-                Anterior
-              </button>
-
-              {pageList.map((p, idx) => (
-                typeof p === 'number' ? (
-                  <button
-                    key={`p-${p}-${idx}`}
-                    className={`px-2 py-1 text-sm border rounded ${p === currentPage ? 'bg-blue-600 text-white border-blue-600' : ''}`}
-                    onClick={() => goToPage(p)}
-                  >
-                    {p}
-                  </button>
-                ) : (
-                  <span key={`dots-${idx}`} className="px-2 py-1 text-sm">…</span>
-                )
-              ))}
-
-              <button
-                className="px-2 py-1 text-sm border rounded disabled:opacity-50"
-                onClick={() => goToPage(currentPage + 1)}
-                disabled={currentPage >= totalPages}
-              >
-                Siguiente
-              </button>
+            <div className="mt-4">
+              <button onClick={closeCatalog}
+                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Cerrar</button>
             </div>
-          </div>
-
-          {/* Bottom Close button */}
-          <div className="mt-4">
-            <button
-              onClick={closeCatalog}
-              className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
-            >
-              Cerrar
-            </button>
           </div>
         </div>
-      </div>
       )}
     </>
   );
