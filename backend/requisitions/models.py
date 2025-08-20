@@ -121,9 +121,9 @@ class Requisition(models.Model):
     external_service = models.ForeignKey(ExternalService, on_delete=models.PROTECT)
     tender = models.ForeignKey(Tender, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
-    requisition_reason = models.TextField()
+    requisition_reason = models.TextField(blank=True, null=True)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='registered')
-    observations = models.TextField(null=True, blank=True)  # optional text
+    observations = models.TextField(blank=True, null=True)
 
     class Meta:
         verbose_name = "Requisition"

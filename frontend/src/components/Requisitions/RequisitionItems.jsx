@@ -168,7 +168,7 @@ export default function RequisitionItems({
     }
   }, [setRequisitionNumber]);
 
-  // ================ Registro modal ================
+  // ======= Registro modal =======
   const [showRegistroModal, setShowRegistroModal] = useState(false);
   const [regProductId, setRegProductId] = useState('');
   const [regDescripcion, setRegDescripcion] = useState('');
@@ -250,7 +250,7 @@ export default function RequisitionItems({
     }
   };
 
-  // ================ Catálogo modal ================
+  // ======= Catálogo modal =======
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(null);
@@ -261,7 +261,6 @@ export default function RequisitionItems({
   const [page, setPage] = useState(1);
 
   const openCatalog = async () => {
-    // Open the modal first; then fetch
     setShowCatalogModal(true);
     setCatalogError(null);
     setSearchQuery('');
@@ -546,8 +545,8 @@ export default function RequisitionItems({
         </table>
       </div>
 
-      {/* (Buttons removed – handled in the Wizard below “Observaciones”) */}
-
+      {/* Buttons are rendered in the Wizard below “Observaciones” */}
+      
       {/* Modal: Registro */}
       {showRegistroModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
