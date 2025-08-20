@@ -14,7 +14,7 @@ export default function RequisitionCard({ requisition }) {
       )}
       {requisition.created_at && (
         <p className="text-xs text-gray-400 mt-1">
-          Created: {new Date(requisition.created_at).toLocaleDateString()}
+          Created: {new Date(requisition.created_at).toLocaleDateString('es-MX')}
         </p>
       )}
     </div>

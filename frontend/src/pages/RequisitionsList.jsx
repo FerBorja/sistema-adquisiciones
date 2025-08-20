@@ -3,6 +3,22 @@ import React, { useEffect, useState, useContext } from 'react';
 import apiClient from '../api/apiClient';
 import { AuthContext } from '../contexts/AuthContext';
 
+// Map DB statuses -> Spanish labels (case-insensitive)
+const STATUS_LABEL = new Map([
+  ['pending', 'Pendiente'],
+  ['approved', 'Aprobado'], // (sic) per requested label
+  ['registered', 'Registrado'],
+  ['completed', 'Completado'],
+  ['sent', 'Enviado a Unidad Central'],
+  ['received', 'Recibido por Oficina de Administración'],
+]);
+
+const displayStatus = (value) => {
+  if (!value) return 'Pendiente';
+  const key = String(value).trim().toLowerCase();
+  return STATUS_LABEL.get(key) ?? value;
+};
+
 export default function RequisitionsList() {
   const { user } = useContext(AuthContext);
   const [requisitions, setRequisitions] = useState([]);
@@ -56,7 +72,7 @@ export default function RequisitionsList() {
             {requisitions.length === 0 ? (
               <tr>
                 <td
-                  colSpan={canModify ? 6 : 5} // Adjusted colspan
+                  colSpan={canModify ? 6 : 5}
                   className="text-center py-4 border-2 border-indigo-300"
                 >
                   No hay requisiciones
@@ -70,10 +86,12 @@ export default function RequisitionsList() {
                 >
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.id}</td>
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                    {new Date(req.created_at).toLocaleDateString()}
+                    {new Date(req.created_at).toLocaleDateString('es-MX')}
                   </td>
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.requisition_reason}</td>
-                  <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.status || 'Pendiente'}</td>
+                  <td className="px-4 py-2 border-2 border-indigo-300 text-center">
+                    {displayStatus(req.status)}
+                  </td>
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">
                     <button
                       className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
