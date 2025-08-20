@@ -5,8 +5,9 @@ from datetime import datetime
 from django.conf import settings
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
-from reportlab.pdfgen import canvas
-from reportlab.platypus import Table, TableStyle, Paragraph
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
+)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
@@ -97,23 +98,18 @@ def _dedup_join(code, name, sep=' - '):
 
     def simplify(x: str) -> str:
         x = x.lower().strip()
-        # drop punctuation, keep letters/numbers/spaces
         return ''.join(ch for ch in x if ch.isalnum() or ch.isspace())
 
     sc, sn = simplify(c), simplify(n)
     if not sc and not sn:
         return ''
 
-    # if one contains the other, return the richer original
     if sn and sn in sc:
         return c
     if sc and sc in sn:
         return n
-
-    # identical after simplification → return one
     if sc == sn:
         return c
-
     return f"{c}{sep}{n}"
 
 # Build best label for product / expense object with de-dup
@@ -129,7 +125,6 @@ def _label_expense_object(product):
         lab = _dedup_join(code, name)
         if lab and not _is_placeholder(lab):
             return lab
-        # fallback to eo string
         lab = _as_text(eo)
         if lab and not _is_placeholder(lab):
             return lab
@@ -160,72 +155,36 @@ def _label_description(desc):
     text = _as_text(desc, ['text', 'descripcion', 'name', 'label']) or _as_text(desc)
     return text or '—'
 
-# ---------- generator ----------
+# ---------- generator (now using Platypus so the items table can split across pages) ----------
 def generate_requisition_pdf(requisition):
     buffer = BytesIO()
-    p = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
 
-    # Paths
-    logo_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'uach_logo.png')
-
-    # Margins
-    margin_left = 50
-    margin_top = height - 50
-    bottom_margin = 80
+    # Page geometry
+    PAGE = letter
+    page_w, page_h = PAGE
+    left_margin = 50
+    right_margin = 50
+    top_margin = 120    # leave space for header (title + logo + line)
+    bottom_margin = 100
     line_height = 16
 
-    # Styles for wrapped table cells / paragraphs
+    # Styles
     styles = getSampleStyleSheet()
     base = styles['Normal']
-    cell_left = ParagraphStyle(
-        'CellLeft', parent=base, fontName='Helvetica', fontSize=9, leading=11,
-        wordWrap='CJK',  # allows breaking long tokens
-        alignment=TA_LEFT, spaceBefore=0, spaceAfter=0
-    )
-    cell_center = ParagraphStyle(
-        'CellCenter', parent=cell_left, alignment=TA_CENTER
-    )
-    para_left = ParagraphStyle(
-        'ParaLeft', parent=base, fontName='Helvetica', fontSize=10, leading=12,
-        wordWrap='CJK', alignment=TA_LEFT, spaceBefore=0, spaceAfter=0
-    )
-    sig_title = ParagraphStyle(
-        'SigTitle', parent=base, fontName='Helvetica-Bold', fontSize=10,
-        alignment=TA_CENTER, spaceBefore=0, spaceAfter=2
-    )
-    sig_name = ParagraphStyle(
-        'SigName', parent=base, fontName='Helvetica', fontSize=9,
-        alignment=TA_CENTER, spaceBefore=2, spaceAfter=0
-    )
+    h1 = ParagraphStyle('H1', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, spaceAfter=6)
+    small = ParagraphStyle('small', parent=base, fontName='Helvetica', fontSize=9, leading=11)
+    normal = ParagraphStyle('normal', parent=base, fontName='Helvetica', fontSize=10, leading=12)
+    bold = ParagraphStyle('bold', parent=normal, fontName='Helvetica-Bold')
+    cell_left = ParagraphStyle('CellLeft', parent=small, wordWrap='CJK', alignment=TA_LEFT)
+    cell_center = ParagraphStyle('CellCenter', parent=small, wordWrap='CJK', alignment=TA_CENTER)
+    sig_title = ParagraphStyle('SigTitle', parent=base, fontName='Helvetica-Bold', fontSize=10, alignment=TA_CENTER)
+    sig_name = ParagraphStyle('SigName', parent=base, fontName='Helvetica', fontSize=9, alignment=TA_CENTER)
 
-    # Header
-    p.setFont("Helvetica-Bold", 14)
-    p.drawString(margin_left, margin_top, "Sistema Integral de Adquisiciones FING")
-    p.setFont("Helvetica", 12)
-    p.drawString(margin_left, margin_top - 20, "Universidad Autónoma de Chihuahua - Requisición")
+    # Header/footer drawing (repeats on all pages)
+    logo_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'uach_logo.png')
 
-    # Logo (optional)
-    try:
-        if os.path.exists(logo_path):
-            p.drawImage(
-                logo_path, x=500, y=height - 80,
-                width=100, height=50, preserveAspectRatio=True, mask='auto'
-            )
-    except Exception:
-        pass
-
-    # Line
-    p.line(margin_left, margin_top - 60, width - margin_left, margin_top - 60)
-
-    y = margin_top - 80
-
-    # Requisition header info
-    p.setFont("Helvetica-Bold", 12)
-    p.drawString(margin_left, y, f"Folio {requisition.id}")
-    y -= line_height * 2
-
-    # User full name
+    admin_unit = _as_text(_get(requisition, 'administrative_unit'),
+                          ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     user = _get(requisition, 'user')
     user_name = (
         _as_text(user, ['full_name', 'get_full_name']) or
@@ -233,10 +192,57 @@ def generate_requisition_pdf(requisition):
         _as_text(user)
     )
 
-    # Top fields
+    def draw_page(c, doc):
+        # Header title
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left_margin, page_h - 50, "Sistema Integral de Adquisiciones FING")
+        c.setFont("Helvetica", 12)
+        c.drawString(left_margin, page_h - 70, "Universidad Autónoma de Chihuahua - Requisición")
+        # Logo
+        try:
+            if os.path.exists(logo_path):
+                c.drawImage(logo_path, x=page_w - right_margin - 100, y=page_h - 80,
+                            width=100, height=50, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+        # Separator line
+        c.line(left_margin, page_h - 90, page_w - right_margin, page_h - 90)
+
+        # Footer (address + printed at + generated by)
+        address_lines = [
+            "FACULTAD DE INGENIERÍA",
+            "Circuito No. 1, Campus Universitario 2",
+            "Chihuahua, Chih. México. C.P. 31125",
+            "Tel. (614) 442-95-00",
+            "www.uach.mx/fing"
+        ]
+        c.setFont("Helvetica", 9)
+        for i, line in enumerate(address_lines):
+            c.drawString(left_margin, 110 - i * 12, line)
+
+        footer_left = f"Generado por {user_name or '—'} - {(admin_unit or '—')}"
+        print_date = datetime.now().strftime("%d/%m/%Y %H:%M")
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(left_margin, 40, footer_left)
+        c.drawRightString(page_w - right_margin, 40, f"Fecha de impresión: {print_date}")
+
+    # Document
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=PAGE,
+        leftMargin=left_margin, rightMargin=right_margin,
+        topMargin=top_margin, bottomMargin=bottom_margin,
+        title=f"requisicion_{requisition.id}.pdf"
+    )
+
+    story = []
+
+    # Folio
+    story.append(Paragraph(f"Folio {requisition.id}", bold))
+    story.append(Spacer(1, 8))
+
+    # Top fields as a two-column table (label/value) that wraps
     created_at = _format_dmy(_get(requisition, 'created_at'))
-    administrative_unit = _as_text(_get(requisition, 'administrative_unit'),
-                                   ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     requesting_department = _as_text(_get(requisition, 'requesting_department'),
                                      ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     project = _as_text(_get(requisition, 'project'),
@@ -256,9 +262,8 @@ def generate_requisition_pdf(requisition):
     requisition_reason = _as_text(_get(requisition, 'requisition_reason'),
                                   ['text', 'descripcion', 'description', 'label']) or _as_text(_get(requisition, 'requisition_reason'))
 
-    p.setFont("Helvetica", 10)
     fields = [
-        ("Unidad Administrativa", administrative_unit or '—'),
+        ("Unidad Administrativa", admin_unit or '—'),
         ("Departamento Solicitante", requesting_department or '—'),
         ("Proyecto", project or '—'),
         ("Fuente de Financiamiento", funding_source or '—'),
@@ -271,14 +276,27 @@ def generate_requisition_pdf(requisition):
         ("Licitación", tender or '—'),
         ("Solicitante", user_name or '—'),
     ]
-    for label, value in fields:
-        p.drawString(margin_left, y, f"{label}: {value}")
-        y -= line_height
+    field_rows = [[Paragraph(f"<b>{_escape(lbl)}:</b>", normal),
+                   Paragraph(_escape(val), normal)] for lbl, val in fields]
 
-    y -= line_height
+    fields_table = Table(field_rows, colWidths=[180, doc.width - 180])
+    fields_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+    ]))
+    story.append(fields_table)
+    story.append(Spacer(1, 12))
 
-    # ---- Table data with wrapped cells ----
-    items_data = [['Objeto del Gasto', 'Cantidad', 'Unidad', 'Descripción']]
+    # ---- Items table (SPLITS ACROSS PAGES) ----
+    items_data = [[
+        Paragraph("Objeto del Gasto", ParagraphStyle('th', parent=bold, alignment=TA_LEFT)),
+        Paragraph("Cantidad", ParagraphStyle('th2', parent=bold, alignment=TA_CENTER)),
+        Paragraph("Unidad", ParagraphStyle('th3', parent=bold, alignment=TA_CENTER)),
+        Paragraph("Descripción", ParagraphStyle('th4', parent=bold, alignment=TA_LEFT)),
+    ]]
+
     try:
         for item in requisition.items.all():
             prod_label = _label_expense_object(_get(item, 'product')) or '—'
@@ -296,30 +314,28 @@ def generate_requisition_pdf(requisition):
             except Exception:
                 qty_str = _as_text(qty) or '—'
 
-            # Wrap text via Paragraphs (escape to avoid XML issues)
-            prod_par = Paragraph(_escape(prod_label), style=cell_left)
-            unit_par = Paragraph(_escape(unit_label), style=cell_center)
-            desc_par = Paragraph(_escape(desc_label), style=cell_left)
-            qty_par = Paragraph(_escape(qty_str), style=cell_center)
-
-            items_data.append([prod_par, qty_par, unit_par, desc_par])
+            items_data.append([
+                Paragraph(_escape(prod_label), cell_left),
+                Paragraph(_escape(qty_str), cell_center),
+                Paragraph(_escape(unit_label), cell_center),
+                Paragraph(_escape(desc_label), cell_left),
+            ])
     except Exception:
         items_data.append(['—', '—', '—', '—'])
 
-    # Column widths: compute last col to fill page width
-    table_max_width = width - 2 * margin_left
+    # Column widths
     col0, col1, col2 = 150, 60, 80
-    col3 = max(140, table_max_width - (col0 + col1 + col2))  # ensure decent width for Descripción
+    col3 = max(140, doc.width - (col0 + col1 + col2))
 
-    table = Table(items_data, colWidths=[col0, col1, col2, col3])
-    table.setStyle(TableStyle([
+    items_table = Table(items_data, colWidths=[col0, col1, col2, col3], repeatRows=1)
+    items_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-        ('VALIGN', (0, 1), (-1, -1), 'TOP'),  # important for multi-line cells
-        ('ALIGN', (1, 1), (2, -1), 'CENTER'), # qty + unit columns center
+        ('VALIGN', (0, 1), (-1, -1), 'TOP'),
+        ('ALIGN', (1, 1), (2, -1), 'CENTER'),
         ('ALIGN', (0, 1), (0, -1), 'LEFT'),
         ('ALIGN', (3, 1), (3, -1), 'LEFT'),
         ('LEFTPADDING', (0, 0), (-1, -1), 4),
@@ -327,96 +343,54 @@ def generate_requisition_pdf(requisition):
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
     ]))
 
-    # Draw table (auto row heights thanks to Paragraph)
-    table_width, table_height = table.wrap(0, 0)
-    table_y = y - table_height
-    if table_y < bottom_margin:
-        p.showPage()
-        y = height - bottom_margin
-        table_y = y - table_height
-    table.drawOn(p, margin_left, table_y)
-    y = table_y - line_height * 2
+    story.append(items_table)
+    story.append(Spacer(1, 12))
 
-    # ---- Observaciones (below table) ----
+    # ---- Observaciones ----
     obs_text = _as_text(_get(requisition, 'observations'),
                         ['text', 'descripcion', 'description', 'label'])
     if obs_text:
-        obs_par = Paragraph(_escape(obs_text), style=para_left)
-        avail_w = width - 2 * margin_left
-        _, obs_h = obs_par.wrap(avail_w, height)
+        obs_title = Paragraph("<b>Observaciones:</b>", normal)
+        obs_par = Paragraph(_escape(obs_text), normal)
+        # Prefer keep-together, but fall back if too long
+        try:
+            story.append(KeepTogether([obs_title, Spacer(1, 4), obs_par, Spacer(1, 12)]))
+        except Exception:
+            story.extend([obs_title, Spacer(1, 4), obs_par, Spacer(1, 12)])
 
-        needed = line_height + obs_h + line_height  # title + paragraph + spacing
-        if y - needed < bottom_margin:
-            p.showPage()
-            y = height - bottom_margin
-
-        p.setFont("Helvetica-Bold", 12)
-        p.drawString(margin_left, y, "Observaciones:")
-        y -= line_height
-
-        obs_par.drawOn(p, margin_left, y - obs_h)
-        y = y - obs_h - line_height
-
-    # ---- Signature table (replace "Firmas:" with a 3-column sign table) ----
-    # Titles: Solicitó | Revisó | Autorizó
-    # Row 2: space to sign (with lines)
-    # Row 3: names (requester + fixed names)
+    # ---- Signatures table (3 columns) ----
+    requester_name = user_name or '—'
     titles_row = [
         Paragraph("Solicitó", sig_title),
         Paragraph("Revisó", sig_title),
         Paragraph("Autorizó", sig_title),
     ]
     names_row = [
-        Paragraph(_escape(user_name or '—'), sig_name),
+        Paragraph(_escape(requester_name), sig_name),
         Paragraph("M.I. Arión Ehécatl Juárez Menchaca", sig_name),
         Paragraph("M.I. Adrián Isaac Orpinel Ureña", sig_name),
     ]
-    sign_data = [
-        titles_row,
-        ["", "", ""],   # space to sign (we'll draw a line below)
-        names_row,
-    ]
-
-    avail_w = width - 2 * margin_left
-    col_w = avail_w / 3.0
-    sign_table = Table(sign_data, colWidths=[col_w, col_w, col_w], rowHeights=[None, 40, None])
+    sign_table = Table(
+        [titles_row, ["", "", ""], names_row],
+        colWidths=[doc.width / 3.0] * 3,
+        rowHeights=[None, 40, None]
+    )
     sign_table.setStyle(TableStyle([
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        # Draw signature lines below the signing row (row index 1)
         ('LINEBELOW', (0, 1), (-1, 1), 1, colors.black),
         ('TOPPADDING', (0, 0), (-1, -1), 4),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        # No outer grid for a cleaner look
     ]))
 
-    sw, sh = sign_table.wrap(0, 0)
-    if y - sh < bottom_margin:
-        p.showPage()
-        y = height - bottom_margin
-    sign_table.drawOn(p, margin_left, y - sh)
-    y = y - sh - line_height
+    # Keep signatures together; if it doesn't fit, it will move to next page intact
+    try:
+        story.append(KeepTogether([Spacer(1, 8), sign_table]))
+    except Exception:
+        story.extend([Spacer(1, 8), sign_table])
 
-    # Address block
-    address_lines = [
-        "FACULTAD DE INGENIERÍA",
-        "Circuito No. 1, Campus Universitario 2",
-        "Chihuahua, Chih. México. C.P. 31125",
-        "Tel. (614) 442-95-00",
-        "www.uach.mx/fing"
-    ]
-    p.setFont("Helvetica", 9)
-    for i, line in enumerate(address_lines):
-        p.drawString(50, 110 - i * 12, line)
+    # Build the document (header/footer drawn on each page)
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
 
-    # Footer
-    footer_left = f"Generado por {user_name or '—'} - {(administrative_unit or '—')}"
-    print_date = datetime.now().strftime("%d/%m/%Y %H:%M")
-    p.setFont("Helvetica-Oblique", 8)
-    p.drawString(margin_left, 40, footer_left)
-    p.drawRightString(width - margin_left, 40, f"Fecha de impresión: {print_date}")
-
-    p.showPage()
-    p.save()
     buffer.seek(0)
     return buffer
