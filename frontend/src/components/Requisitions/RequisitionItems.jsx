@@ -7,8 +7,6 @@ export default function RequisitionItems({
   formData,
   items, setItems,
   requisitionNumber, setRequisitionNumber,
-  onCancel,
-  onNext,
 }) {
   const { showToast } = useToast();
 
@@ -170,9 +168,7 @@ export default function RequisitionItems({
     }
   }, [setRequisitionNumber]);
 
-  // ================
-  // Registro modal
-  // ================
+  // ================ Registro modal ================
   const [showRegistroModal, setShowRegistroModal] = useState(false);
   const [regProductId, setRegProductId] = useState('');
   const [regDescripcion, setRegDescripcion] = useState('');
@@ -254,9 +250,7 @@ export default function RequisitionItems({
     }
   };
 
-  // ================
-  // Catálogo modal
-  // ================
+  // ================ Catálogo modal ================
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(null);
@@ -267,6 +261,7 @@ export default function RequisitionItems({
   const [page, setPage] = useState(1);
 
   const openCatalog = async () => {
+    // Open the modal first; then fetch
     setShowCatalogModal(true);
     setCatalogError(null);
     setSearchQuery('');
@@ -310,7 +305,7 @@ export default function RequisitionItems({
   const closeCatalog = () => {
     setShowCatalogModal(false);
     setCatalogRows([]);
-       setSearchQuery('');
+    setSearchQuery('');
     setCatalogError(null);
     setCatalogLoading(false);
     setPage(1);
@@ -381,9 +376,9 @@ export default function RequisitionItems({
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
 
-      {/* New item form — exact order required */}
+      {/* New item form */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end mb-3">
-        {/* 1) Objeto del Gasto (Product) */}
+        {/* 1) Objeto del Gasto */}
         <div className="md:col-span-4">
           <label className="block mb-1 font-medium">Objeto del Gasto</label>
           <select
@@ -551,12 +546,7 @@ export default function RequisitionItems({
         </table>
       </div>
 
-      <div className="flex justify-between mt-6 gap-2">
-        <button type="button" onClick={onCancel}
-          className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded">Cancelar</button>
-        <button type="button" onClick={onNext}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Siguiente</button>
-      </div>
+      {/* (Buttons removed – handled in the Wizard below “Observaciones”) */}
 
       {/* Modal: Registro */}
       {showRegistroModal && (

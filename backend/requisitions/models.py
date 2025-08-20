@@ -123,6 +123,7 @@ class Requisition(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     requisition_reason = models.TextField()
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='registered')
+    observations = models.TextField(null=True, blank=True)  # optional text
 
     class Meta:
         verbose_name = "Requisition"
