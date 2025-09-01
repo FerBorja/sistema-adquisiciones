@@ -30,8 +30,13 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     search_fields = ['requisition_reason']
 
     def get_queryset(self):
-        # Return only requisitions belonging to the authenticated user
-        return Requisition.objects.filter(user=self.request.user)
+        user = self.request.user
+        qs = Requisition.objects.all()
+        # Any of these flags/roles should grant full visibility
+        if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False) \
+           or getattr(user, "role", "") in ("admin", "superuser"):
+            return qs
+        return qs.filter(user=user)
 
     def perform_create(self, serializer):
         # Ensure the authenticated user is set server-side
@@ -58,5 +63,9 @@ class RequisitionItemViewSet(viewsets.ModelViewSet):
     pagination_class = StandardResultsSetPagination
 
     def get_queryset(self):
-        # Return only items for requisitions belonging to the authenticated user
-        return RequisitionItem.objects.filter(requisition__user=self.request.user)
+        user = self.request.user
+        qs = RequisitionItem.objects.select_related("requisition")
+        if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False) \
+           or getattr(user, "role", "") in ("admin", "superuser"):
+            return qs
+        return qs.filter(requisition__user=user)
