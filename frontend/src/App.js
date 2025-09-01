@@ -1,6 +1,6 @@
 // frontend/src/App.jsx
 import React, { useContext } from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, AuthContext } from "./contexts/AuthContext";
 import { ToastProvider } from "./contexts/ToastContext";
 
@@ -17,18 +17,22 @@ import RequisitionDetail from "./pages/RequisitionDetail";
 
 import RequisitionsLayout from "./components/Layout/RequisitionsLayout";
 import RequisitionsList from "./pages/RequisitionsList";
-// ⬇️ NEW: use the wizard instead of the form directly
 import RequisitionWizard from "./components/Requisitions/RequisitionWizard";
 
 import PrivateRoute from "./routes/PrivateRoute";
+
+import RequisitionEdit from "./pages/RequisitionEdit";
 
 function Layout() {
   const location = useLocation();
   const { token } = useContext(AuthContext);
 
-  // Pages where we hide the global Navbar/Footer
-  const requisitionsPages = ["/requisitions", "/requisitions/new"];
-  const hideNavbar = ["/login", "/register", "/change-password", ...requisitionsPages].includes(location.pathname);
+  // 🔧 Hide navbar/footer on any requisitions sub-route and auth pages
+  const hideNavbar = [
+    "/login",
+    "/register",
+    "/change-password",
+  ].includes(location.pathname) || location.pathname.startsWith("/requisitions");
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -73,6 +77,18 @@ function Layout() {
             }
           />
 
+          {/* Requisition edit (⟵ moved inside PrivateRoute + Layout) */}
+          <Route
+            path="/requisitions/edit/:id"
+            element={
+              <PrivateRoute>
+                <RequisitionsLayout>
+                  <RequisitionEdit />
+                </RequisitionsLayout>
+              </PrivateRoute>
+            }
+          />
+
           {/* Requisition detail */}
           <Route
             path="/requisitions/:id"
@@ -99,9 +115,7 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <Router>
-          <Layout />
-        </Router>
+        <Layout />
       </AuthProvider>
     </ToastProvider>
   );

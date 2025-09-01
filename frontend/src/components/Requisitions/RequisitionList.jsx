@@ -13,13 +13,11 @@ export default function RequisitionList() {
   // Robust date -> dd/mm/yyyy (no timezone drift)
   const toUTCDate = (value) => {
     if (!value) return null;
-    // If it's an ISO date starting with YYYY-MM-DD, parse as UTC date
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
     if (m) {
       const [ , y, mo, d ] = m.map(Number);
       return new Date(Date.UTC(y, mo - 1, d));
     }
-    // Fallback to native parse
     const dt = new Date(value);
     return isNaN(dt.getTime()) ? null : dt;
   };
@@ -36,13 +34,12 @@ export default function RequisitionList() {
   useEffect(() => {
     apiClient.get('/requisitions/')
       .then(res => {
-        const results = Array.isArray(res.data?.results) ? res.data.results : (Array.isArray(res.data) ? res.data : []);
-        // Pre-format date fields to dd/mm/yyyy
+        const results = Array.isArray(res.data?.results)
+          ? res.data.results
+          : (Array.isArray(res.data) ? res.data : []);
         const patched = results.map(r => ({
           ...r,
-          // If your card uses `fecha`, this will show dd/mm/yyyy
           fecha: r.fecha ? formatDMY(r.fecha) : r.fecha,
-          // If your card uses `created_at`, this will also be dd/mm/yyyy
           created_at: r.created_at ? formatDMY(r.created_at) : r.created_at,
         }));
         setRequisitions(patched);
@@ -57,7 +54,17 @@ export default function RequisitionList() {
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {requisitions.map(req => (
-        <RequisitionCard key={req.id} requisition={req} />
+        <div key={req.id} className="flex flex-col gap-2">
+          <RequisitionCard requisition={req} />
+          <div className="mt-1">
+            <Link
+              to={`/requisitions/edit/${req.id}`}
+              className="inline-flex items-center px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Modificar
+            </Link>
+          </div>
+        </div>
       ))}
     </div>
   );
