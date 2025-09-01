@@ -1,3 +1,4 @@
+// frontend/src/components/Requisitions/RequisitionForm.jsx
 import React, { useEffect, useState, useContext, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/apiClient';
@@ -5,7 +6,20 @@ import LoadingSpinner from '../UI/LoadingSpinner';
 import { useToast } from '../../contexts/ToastContext';
 import { AuthContext } from '../../contexts/AuthContext';
 
-export default function RequisitionForm({ embed = false, formData, setFormData }) {
+/**
+ * Props:
+ * - mode: "create" | "edit" (default: "create")
+ * - initialData: requisition object from GET /requisitions/:id/ (required for edit)
+ * - embed: boolean (kept from your original)
+ * - formData, setFormData: (optional) "controlled-if-provided" pattern
+ */
+export default function RequisitionForm({
+  mode = 'create',
+  initialData = null,
+  embed = false,
+  formData,
+  setFormData,
+}) {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const { user } = useContext(AuthContext);
@@ -36,6 +50,7 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
     external_service: '',
     fecha: new Date().toLocaleDateString('es-MX'),
     solicitante: ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim(),
+    // labels for Step 2 / summaries
     project_label: '',
     funding_source_label: '',
     budget_unit_label: '',
@@ -69,7 +84,8 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
         solicitante: ((user?.first_name || '') + ' ' + (user?.last_name || '')).trim() || prev.solicitante,
       }));
     }
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const setRequiredMessage = (e, message) => {
     e.target.setCustomValidity(message);
@@ -115,7 +131,58 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
         showToast?.('Error al cargar catálogos.', 'error');
       }
     })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // only once
+
+  // Helper: set both value + label when you know an ID and you have catalogs
+  const setValueAndLabel = (valueKey, labelKey, id, list, labelBuilder) => {
+    const found = (list || []).find((x) => String(x.id) === String(id));
+    const label = found ? labelBuilder(found) : '';
+    update((prev) => ({ ...prev, [valueKey]: id || '', [labelKey]: label }));
+  };
+
+  // When editing: hydrate the form with initialData (values + labels) once catalogs are loaded
+  useEffect(() => {
+    if (mode !== 'edit' || !initialData) return;
+
+    // Base fields first (safe fallbacks)
+    update((prev) => ({
+      ...prev,
+      // UI textarea maps to backend requisition_reason
+      description: initialData.requisition_reason ?? initialData.description ?? prev.description,
+      // If you later show observations in this step, you can prefill it as well:
+      // observations: initialData.observations ?? '',
+      fecha: prev.fecha, // creation date is server-side; keep UI date read-only
+      title: prev.title, // (not used by backend, kept for UI compatibility)
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, initialData]);
+
+  // Once catalogs are available (or updated), set IDs + labels from initialData
+  useEffect(() => {
+    if (mode !== 'edit' || !initialData) return;
+
+    const {
+      project,
+      funding_source,
+      budget_unit,
+      agreement,
+      tender,
+      category,
+      external_service,
+    } = initialData;
+
+    // Support both nested objects and raw ids from API
+    const getId = (objOrId) => (objOrId && typeof objOrId === 'object' ? objOrId.id : objOrId);
+
+    setValueAndLabel('project', 'project_label', getId(project), catalogs.projects, (p) => p.description);
+    setValueAndLabel('funding_source', 'funding_source_label', getId(funding_source), catalogs.funding_sources, (fs) => `${fs.code} - ${fs.description}`);
+    setValueAndLabel('budget_unit', 'budget_unit_label', getId(budget_unit), catalogs.budget_units, (bu) => `${bu.code} - ${bu.description}`);
+    setValueAndLabel('agreement', 'agreement_label', getId(agreement), catalogs.agreements, (a) => `${a.code} - ${a.description}`);
+    setValueAndLabel('tender', 'tender_label', getId(tender), catalogs.tenders, (t) => t.name);
+    setValueAndLabel('category', 'category_label', getId(category), catalogs.categories, (c) => c.name);
+    setValueAndLabel('external_service', 'external_service_label', getId(external_service), catalogs.external_services, (s) => s.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, initialData, catalogs]);
 
   const handleChange = (e) => {
     update((prev) => ({
@@ -135,25 +202,45 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
     e.preventDefault();
     setLoading(true);
     try {
-      // Only send backend fields
-      const payload = {
-        department: data.department,
-        project: data.project,
-        funding_source: data.funding_source,
-        budget_unit: data.budget_unit,
-        agreement: data.agreement,
-        tender: data.tender,
-        category: data.category,
-        title: data.title,
-        description: data.description,
-        external_service: data.external_service,
+      // ---- Build payload exactly as backend expects ----
+      const basePayload = {
+        project: data.project || null,
+        funding_source: data.funding_source || null,
+        budget_unit: data.budget_unit || null,
+        agreement: data.agreement || null,
+        tender: data.tender || null,
+        category: data.category || null,
+        external_service: data.external_service || null,
+        requisition_reason: data.description || '', // <-- map textarea to backend field
+        // observations: data.observations ?? undefined, // (optional) include if you add it to UI
       };
-      await apiClient.post('/requisitions/', payload);
-      showToast?.('Requisición creada correctamente!', 'success');
+
+      if (mode === 'edit' && initialData?.id) {
+        // Preserve the original requesting_department when editing
+        const rd = initialData.requesting_department;
+        const requesting_department =
+          (rd && typeof rd === 'object' ? rd.id : rd) ?? undefined;
+
+        await apiClient.put(
+          `/requisitions/${initialData.id}/`,
+          {
+            ...basePayload,
+            ...(requesting_department ? { requesting_department } : {}),
+          }
+        );
+        showToast?.('Requisición actualizada correctamente!', 'success');
+      } else {
+        // CREATE:
+        // If your backend auto-sets requesting_department from the user, we can omit it.
+        // If it requires an explicit ID, add a hidden field or fetch it before posting.
+        await apiClient.post('/requisitions/', basePayload);
+        showToast?.('Requisición creada correctamente!', 'success');
+      }
+
       navigate('/requisitions');
     } catch (err) {
-      console.error('Error creating requisición:', err);
-      showToast?.('Error al crear requisición.', 'error');
+      console.error('Error guardando la requisición:', err);
+      showToast?.('Error al guardar la requisición.', 'error');
     } finally {
       setLoading(false);
     }
@@ -162,7 +249,7 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
   // ----- shared content -----
   const content = (
     <>
-      {/* Department (required, read-only) */}
+      {/* Department (read-only visual only) */}
       <label className="block mb-1 font-medium">Departamento</label>
       <input
         type="text"
@@ -343,14 +430,16 @@ export default function RequisitionForm({ embed = false, formData, setFormData }
 
   return (
     <form onSubmit={handleSubmit} className="max-w-lg mx-auto bg-white p-6 rounded-lg shadow space-y-4">
-      <h2 className="text-2xl font-semibold mb-4">Crear Requisición</h2>
+      <h2 className="text-2xl font-semibold mb-4">
+        {mode === 'edit' ? 'Editar Requisición' : 'Crear Requisición'}
+      </h2>
       {content}
       <button
         type="submit"
         disabled={loading}
         className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded w-full disabled:opacity-50"
       >
-        {loading ? <LoadingSpinner /> : 'Enviar'}
+        {loading ? <LoadingSpinner /> : (mode === 'edit' ? 'Guardar Cambios' : 'Enviar')}
       </button>
     </form>
   );

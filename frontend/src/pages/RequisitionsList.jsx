@@ -2,12 +2,12 @@
 import React, { useEffect, useState, useContext } from 'react';
 import apiClient from '../api/apiClient';
 import { AuthContext } from '../contexts/AuthContext';
-import { Link } from 'react-router-dom'; // ✅ IMPORTANTE
+import { useNavigate } from 'react-router-dom';
 
 // Map DB statuses -> Spanish labels (case-insensitive)
 const STATUS_LABEL = new Map([
   ['pending', 'Pendiente'],
-  ['approved', 'Aprobado'], // (sic) per requested label
+  ['approved', 'Aprobado'],
   ['registered', 'Registrado'],
   ['completed', 'Completado'],
   ['sent', 'Enviado a Unidad Central'],
@@ -22,6 +22,8 @@ const displayStatus = (value) => {
 
 export default function RequisitionsList() {
   const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
+
   const [requisitions, setRequisitions] = useState([]);
 
   const userRole = user?.role?.toLowerCase() || '';
@@ -42,6 +44,24 @@ export default function RequisitionsList() {
 
     fetchRequisitions();
   }, []);
+
+  // Local action button using navigate()
+  const ModifyButton = ({ id }) => {
+    const goEdit = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      navigate(`/requisitions/edit/${id}`);
+    };
+    return (
+      <button
+        type="button"
+        onClick={goEdit}
+        className="inline-flex items-center px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700"
+      >
+        Modificar
+      </button>
+    );
+  };
 
   return (
     <div className="flex flex-col">
@@ -96,7 +116,9 @@ export default function RequisitionsList() {
                   <td className="px-4 py-2 border-2 border-indigo-300 text-center">
                     <button
                       className="px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-                      onClick={async () => {
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         try {
                           const token = localStorage.getItem('token'); // get JWT
                           const response = await fetch(`http://localhost:8000/api/requisitions/${req.id}/export_pdf/`, {
@@ -122,13 +144,7 @@ export default function RequisitionsList() {
                   </td>
                   {canModify && (
                     <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                      {/* ✅ Navegación a la página de edición */}
-                      <Link
-                        to={`/requisitions/edit/${req.id}`}
-                        className="inline-flex items-center px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700"
-                      >
-                        Modificar
-                      </Link>
+                      <ModifyButton id={req.id} />
                     </td>
                   )}
                 </tr>
