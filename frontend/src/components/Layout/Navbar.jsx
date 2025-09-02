@@ -16,7 +16,6 @@ export default function Navbar({ minimal = false }) {
     '/change-password'
   ];
 
-  // Hide navbar completely on certain paths
   if (hiddenPaths.includes(location.pathname)) return null;
 
   const handleLogout = () => {
@@ -27,10 +26,21 @@ export default function Navbar({ minimal = false }) {
   // Minimal navbar version
   if (minimal) {
     return (
-      <nav className="bg-indigo-50 border-b border-indigo-200 p-4 flex justify-end items-center">
+      <nav className="bg-indigo-50 border-b border-indigo-200 p-4 flex justify-between items-center">
+        {/* 🔹 Logo on minimal navbar */}
+        <Link to="/" className="flex items-center gap-2">
+          <img
+            src="/images/uach_logo.png" // ✅ from public/images
+            alt="UACH Logo"
+            className="h-10 w-auto object-contain"
+          />
+        </Link>
+
         {user && (
           <div className="flex items-center gap-4">
-            <span className="text-indigo-700 font-semibold">Bienvenido, {user.first_name}</span>
+            <span className="text-indigo-700 font-semibold">
+              Bienvenido, {user.first_name}
+            </span>
             <button
               onClick={handleLogout}
               className="bg-gradient-to-r from-indigo-600 to-pink-500 hover:from-indigo-700 hover:to-pink-600 text-white font-bold py-2 px-4 rounded-3xl shadow-lg transition-transform active:scale-95"
@@ -46,7 +56,16 @@ export default function Navbar({ minimal = false }) {
   // Full navbar version
   return (
     <nav className="bg-indigo-50 border-b border-indigo-200 p-4 flex justify-between items-center">
-      <div className="flex gap-4">
+      <div className="flex items-center gap-6">
+        {/* 🔹 Logo always at the far left */}
+        <Link to="/requisitions" className="flex items-center gap-2">
+          <img
+            src="/images/uach_logo.png" // ✅ from public/images
+            alt="UACH Logo"
+            className="h-10 w-auto object-contain"
+          />
+        </Link>
+
         {user && (
           <>
             <Link to="/" className="font-bold text-lg text-indigo-700">Home</Link>
@@ -55,10 +74,13 @@ export default function Navbar({ minimal = false }) {
           </>
         )}
       </div>
+
       <div className="flex items-center gap-4">
         {user ? (
           <>
-            <span className="text-indigo-700 font-semibold">Welcome, {user.first_name}</span>
+            <span className="text-indigo-700 font-semibold">
+              Welcome, {user.first_name}
+            </span>
             <button
               onClick={handleLogout}
               className="bg-gradient-to-r from-indigo-600 to-pink-500 hover:from-indigo-700 hover:to-pink-600 text-white font-bold py-2 px-4 rounded-3xl shadow-lg transition-transform active:scale-95"
