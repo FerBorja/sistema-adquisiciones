@@ -23,6 +23,8 @@ import PrivateRoute from "./routes/PrivateRoute";
 
 import RequisitionEdit from "./pages/RequisitionEdit";
 
+import Reports from "./pages/Reports";
+
 function Layout() {
   const location = useLocation();
   const { token } = useContext(AuthContext);
@@ -85,6 +87,15 @@ function Layout() {
                 <RequisitionsLayout>
                   <RequisitionEdit />
                 </RequisitionsLayout>
+              </PrivateRoute>
+            }
+          />
+
+          <Route
+            path="/reports"
+            element={
+              <PrivateRoute roles={['admin', 'superuser']}>
+                <Reports />
               </PrivateRoute>
             }
           />
