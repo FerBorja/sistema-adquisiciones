@@ -78,6 +78,19 @@ const STEP2_SPECS = {
   itemDescriptionsPostUrl: "/catalogs/item-descriptions/",
 };
 
+/* ───────────────────────────── Estatus helpers ───────────────────────────── */
+const STATUS_OPTIONS = [
+  { value: "pending",   label: "Pendiente" },
+  { value: "approved",  label: "Aprobado" },
+  { value: "registered",label: "Registrado" },
+  { value: "completed", label: "Completado" },
+  { value: "sent",      label: "Enviado a Unidad Central" },
+  { value: "received",  label: "Recibido por Oficina de Administración" },
+];
+
+const STATUS_LABEL = new Map(STATUS_OPTIONS.map(o => [o.value, o.label]));
+const displayStatus = (val) => STATUS_LABEL.get(String(val || "").trim().toLowerCase()) ?? (val || "—");
+
 export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [step, setStep] = useState(1);
 
@@ -94,6 +107,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     external_service: "",
     created_at: "",
     requisition_reason: "",
+    status: "registered", // NEW: default; will be overridden below
   });
   const [catalogs, setCatalogs] = useState({});
   const [loadingStep1, setLoadingStep1] = useState(false);
@@ -117,6 +131,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       external_service: coerceId(requisition.external_service),
       created_at: yyyyMMdd,
       requisition_reason: requisition.requisition_reason || "",
+      status: requisition.status || "registered", // NEW: seed from backend
     }));
   }, [requisition]);
 
@@ -378,6 +393,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         requisition_reason: headerForm.requisition_reason ?? "",
         observations,
         items,
+        status: headerForm.status, // NEW: persist Estatus
       };
       // Not sending administrative_unit (hidden in UI)
       const resp = await apiClient.put(`/requisitions/${requisition.id}/`, payload);
@@ -398,7 +414,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       {/* Banner */}
       <div className="bg-blue-50 border border-blue-200 text-blue-900 px-4 py-3 rounded mb-4">
         <strong>Editar Requisición #{requisition.id}</strong>
-        <div className="text-sm">Estatus actual: {requisition.status}</div>
+        <div className="text-sm">Estatus actual: {displayStatus(requisition.status)}</div>
       </div>
 
       {/* Stepper */}
@@ -434,6 +450,25 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     placeholder={`Selecciona ${CATALOG_META[key].uiLabel.toLowerCase()}`}
                   />
                 ))}
+
+              {/* Estatus (NEW) */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Estatus</label>
+                <select
+                  className="w-full border rounded px-2 py-1"
+                  value={headerForm.status}
+                  onChange={(e) => onChangeHeader("status", e.target.value)}
+                >
+                  {STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Guarda usando el identificador del backend (p. ej. <code>pending</code>, <code>approved</code>, etc.).
+                </p>
+              </div>
 
               {/* Fecha de creación (read-only) */}
               <div>
@@ -542,7 +577,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   </select>
                 </div>
 
-                {/* Action row: Agregar on left | (right) Clasificador / Ver Catálogo / Registrar */}
+                {/* Action row */}
                 <div className="md:col-span-4 flex items-center gap-2">
                   <button type="submit" className="px-3 py-1 rounded bg-green-600 text-white hover:bg-green-700">
                     {form.id ? "Guardar cambios" : "Agregar"}
