@@ -1,35 +1,48 @@
-from django.shortcuts import render
+# backend/reports/views.py
+
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
-from requisitions.models import Requisition
 from django.db.models import Count
 from django.utils.dateparse import parse_date
 from django.db.models.functions import TruncMonth
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from io import BytesIO
 from django.http import HttpResponse
 from rest_framework.decorators import action
 from rest_framework import viewsets, permissions
+
 from requisitions.models import Requisition
 from .pdf_generator import generate_requisition_report_pdf
 
 
 class RequisitionsByUnitView(APIView):
+    """
+    Totales por Departamento (antes: Unidad Administrativa)
+    GET /api/reports/by-unit/
+    Respuesta: [{ "requesting_department": "<nombre>", "total": <int> }, ...]
+    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
         data = (
             Requisition.objects
-            .values('administrative_unit')
+            .values('requesting_department__name')
             .annotate(total=Count('id'))
-            .order_by('administrative_unit')
+            .order_by('requesting_department__name')
         )
-        return Response(data)
+        # Renombrar clave para el frontend
+        result = [{
+            'requesting_department': item['requesting_department__name'] or '—',
+            'total': item['total'],
+        } for item in data]
+        return Response(result)
 
 
 class RequisitionsByMonthAndUnitView(APIView):
+    """
+    Serie por mes y Departamento (antes: Unidad Administrativa)
+    GET /api/reports/by-month-unit/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+    Respuesta: [{ "month": "YYYY-MM", "requesting_department": "<nombre>", "total": <int> }, ...]
+    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
@@ -45,14 +58,14 @@ class RequisitionsByMonthAndUnitView(APIView):
         data = (
             queryset
             .annotate(month=TruncMonth('created_at'))
-            .values('month', 'administrative_unit')
+            .values('month', 'requesting_department__name')
             .annotate(total=Count('id'))
-            .order_by('month', 'administrative_unit')
+            .order_by('month', 'requesting_department__name')
         )
-        # Format month as string for JSON
+
         result = [{
             'month': item['month'].strftime('%Y-%m'),
-            'administrative_unit': item['administrative_unit'],
+            'requesting_department': item['requesting_department__name'] or '—',
             'total': item['total'],
         } for item in data]
 
@@ -60,6 +73,11 @@ class RequisitionsByMonthAndUnitView(APIView):
 
 
 class RequisitionsByCategoryView(APIView):
+    """
+    Totales por Categoría (sin cambios)
+    GET /api/reports/by-category/
+    Respuesta: [{ "category__name": "<nombre>", "total": <int> }, ...]
+    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
@@ -73,41 +91,58 @@ class RequisitionsByCategoryView(APIView):
 
 
 class RequisitionSummaryPDFView(APIView):
+    """
+    PDF simple de resumen. Ahora agrupa por Departamento.
+    GET /api/reports/summary-pdf/
+    """
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas
+        from io import BytesIO
+
         buffer = BytesIO()
         p = canvas.Canvas(buffer, pagesize=letter)
         width, height = letter
 
         p.setFont("Helvetica-Bold", 16)
-        p.drawString(50, height - 50, "Reporte de Requisiciones por Unidad Administrativa")
+        p.drawString(50, height - 50, "Reporte de Requisiciones por Departamento")
 
-        data = Requisition.objects.values('administrative_unit').annotate(total=Count('id')).order_by('administrative_unit')
+        data = (
+            Requisition.objects
+            .values('requesting_department__name')
+            .annotate(total=Count('id'))
+            .order_by('requesting_department__name')
+        )
 
         y = height - 80
         p.setFont("Helvetica", 12)
         for item in data:
-            p.drawString(50, y, f"{item['administrative_unit']}: {item['total']}")
+            dep = item['requesting_department__name'] or '—'
+            p.drawString(50, y, f"{dep}: {item['total']}")
             y -= 20
             if y < 50:
                 p.showPage()
+                p.setFont("Helvetica", 12)
                 y = height - 50
 
         p.showPage()
         p.save()
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
-    
+
+
 class ReportsViewSet(viewsets.ViewSet):
+    """
+    PDF detallado (tabla) – sin cambio de firma.
+    El diseño del PDF (encabezados/agrupaciones) se actualiza en pdf_generator.py
+    si quieres que también muestre/agrupé por Departamento.
+    """
     permission_classes = [permissions.IsAdminUser]
 
     @action(detail=False, methods=['get'])
     def requisitions_report(self, request):
-        # Get all requisitions or filter by some criteria if you want
         requisitions = Requisition.objects.all().order_by('-created_at')
-
         pdf_buffer = generate_requisition_report_pdf(requisitions)
-
         return HttpResponse(pdf_buffer, content_type='application/pdf')
-
