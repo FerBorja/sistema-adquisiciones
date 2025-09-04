@@ -116,6 +116,15 @@ def _escape(text: str) -> str:
          .replace('>', '&gt;')
     )
 
+def _status_text(req):
+    try:
+        s = req.get_status_display()
+        if s:
+            return str(s)
+    except Exception:
+        pass
+    return _as_text(_get(req, 'status')) or '—'
+
 def _label_expense_object(product):
     if product is None:
         return '—'
@@ -185,8 +194,7 @@ def _build_dashboard_story(kpis, logo_path):
 
     story = []
 
-    # Encabezado con logo (si existe)
-    title_row = []
+    # Encabezado
     story.append(Paragraph("Reporte Detallado de Requisiciones", h1))
     story.append(Paragraph("Facultad de Ingeniería — Universidad Autónoma de Chihuahua", normal))
     story.append(Spacer(1, 8))
@@ -196,7 +204,11 @@ def _build_dashboard_story(kpis, logo_path):
     st = {r['name']: r['value'] for r in kpis['status_rows']}
     def getv(key): return st.get(key, 0)
 
-    # Presentación tipo “tarjetas” como tabla simple
+    # 🔹 TÍTULO requerido para la PRIMERA TABLA
+    story.append(Paragraph("Estatus general de requisiciones", h2))
+    story.append(Spacer(1, 4))
+
+    # Tabla simple de KPIs
     kpi_data = [
         ["Total", str(total), "Pending", str(getv('pending')), "Approved", str(getv('approved'))],
         ["Registered", str(getv('registered')), "Completed", str(getv('completed')), "Sent", str(getv('sent'))],
@@ -216,13 +228,12 @@ def _build_dashboard_story(kpis, logo_path):
     story.append(Spacer(1, 10))
 
     # Gráficas
-    # 1) Pastel por estatus
+    from .pdf_generator import chart_pie_by_status  # si ya está arriba, puedes quitar esta línea
     pie_png = chart_pie_by_status(kpis['status_rows'])
-    # 2) Barras top departamentos (usa charts.py)
     bar_dept_png = chart_bar_by_department(kpis['dept_rows_top5'])
 
     story.append(Paragraph("Distribución por Estatus", h2))
-    story.append(Image(pie_png, width=340, height=340))
+    story.append(Image(pie_png, width=260, height=260))
     story.append(Spacer(1, 8))
 
     story.append(Paragraph("Top 5 Departamentos por Volumen", h2))
@@ -233,6 +244,7 @@ def _build_dashboard_story(kpis, logo_path):
     story.append(PageBreak())
 
     return story
+
 
 
 # ---------- generator (tabla detallada, ahora agrupada por Departamento) ----------
@@ -286,6 +298,44 @@ def generate_requisition_report_pdf(requisitions):
         dname = _as_text(_get(req, 'requesting_department'), ['name', 'descripcion', 'description', 'label']) or 'Sin Departamento'
         reqs_by_dept[dname].append(req)
 
+    def _make_dept_table(data, available_width):
+        """
+        Ajusta las columnas proporcionalmente al ancho disponible.
+        Reparte más ancho a columnas largas (Departamento, Proyecto, Motivo).
+        """
+        # pesos relativos por columna: ID, Fecha, Usuario, Departamento, Proyecto, Motivo, Estado
+        weights = [6, 9, 14, 16, 16, 29, 10]
+        total = sum(weights)
+        col_widths = [available_width * w / total for w in weights]
+
+        table = Table(data, colWidths=col_widths, repeatRows=1, hAlign='LEFT')
+        table.setStyle(TableStyle([
+            # encabezado
+            ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
+            ('TEXTCOLOR',  (0, 0), (-1, 0), colors.whitesmoke),
+            ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE',   (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+
+            # cuerpo
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('VALIGN',   (0, 1), (-1, -1), 'TOP'),
+
+            # compactar padding para que quepa mejor
+            ('LEFTPADDING',  (0, 0), (-1, -1), 3),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+            ('TOPPADDING',   (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 3),
+
+            # bordes finos
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.black),
+        ]))
+        # Permite que la tabla se parta por filas entre páginas (default),
+        # y forzamos ajuste por filas largas (ya usas Paragraph con wordWrap).
+        table.splitByRow = True
+        return table
+
     for dept_name in sorted(reqs_by_dept.keys()):
         # Título por departamento
         story.append(Paragraph(f"Departamento: {dept_name}", style_title))
@@ -307,7 +357,7 @@ def generate_requisition_report_pdf(requisitions):
                                ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
             reason = _as_text(_get(req, 'requisition_reason'),
                               ['text', 'descripcion', 'description', 'label']) or _as_text(_get(req, 'requisition_reason'))
-            status_disp = _as_text(_get(req, 'get_status_display'), []) or _as_text(_get(req, 'status'))
+            status_disp = _status_text(req)
 
             data.append([
                 str(req.id),
@@ -320,21 +370,9 @@ def generate_requisition_report_pdf(requisitions):
             ])
 
         # Anchos (horizontal: más espacio para “Motivo”)
-        table = Table(data, colWidths=[40, 60, 100, 120, 140, 260, 80], repeatRows=1)
-        style = TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        available_width = doc.width  # respeta márgenes del SimpleDocTemplate
+        table = _make_dept_table(data, available_width)
 
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
-
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-            ('VALIGN', (0, 1), (-1, -1), 'TOP'),
-
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ])
-        table.setStyle(style)
 
         # Añadir y separar cada bloque
         story.append(table)
