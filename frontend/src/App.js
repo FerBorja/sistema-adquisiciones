@@ -1,6 +1,6 @@
 // frontend/src/App.jsx
 import React, { useContext } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { AuthProvider, AuthContext } from "./contexts/AuthContext";
 import { ToastProvider } from "./contexts/ToastContext";
 
@@ -18,115 +18,72 @@ import RequisitionDetail from "./pages/RequisitionDetail";
 import RequisitionsLayout from "./components/Layout/RequisitionsLayout";
 import RequisitionsList from "./pages/RequisitionsList";
 import RequisitionWizard from "./components/Requisitions/RequisitionWizard";
+import RequisitionEdit from "./pages/RequisitionEdit";
+import Reports from "./pages/Reports";
 
 import PrivateRoute from "./routes/PrivateRoute";
 
-import RequisitionEdit from "./pages/RequisitionEdit";
-
-import Reports from "./pages/Reports";
-
-function Layout() {
-  const location = useLocation();
-  const { token } = useContext(AuthContext);
-
-  // 🔧 Hide navbar/footer on any requisitions sub-route and auth pages
-  const hideNavbar = [
-    "/login",
-    "/register",
-    "/change-password",
-  ].includes(location.pathname) || location.pathname.startsWith("/requisitions");
-
+/* ────────────────────────────────────────────────────────────────────────────
+   Public layout: shows global Navbar/Footer for public routes only
+--------------------------------------------------------------------------- */
+function PublicLayout() {
   return (
     <div className="flex flex-col min-h-screen">
-      {!hideNavbar && <Navbar />}
+      <Navbar />
       <main className="flex-1 p-4">
-        <Routes>
-          {/* Root redirect based on auth */}
-          <Route
-            path="/"
-            element={token ? <Navigate to="/requisitions" replace /> : <Navigate to="/login" replace />}
-          />
-
-          {/* Public */}
-          <Route path="/about" element={<About />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/password-reset-request" element={<PasswordResetRequest />} />
-          <Route path="/password-reset-confirm/:uid/:token" element={<ChangePassword />} />
-          <Route path="/change-password" element={<ChangePassword />} />
-
-          {/* Requisitions list */}
-          <Route
-            path="/requisitions"
-            element={
-              <PrivateRoute>
-                <RequisitionsLayout>
-                  <RequisitionsList />
-                </RequisitionsLayout>
-              </PrivateRoute>
-            }
-          />
-
-          {/* Requisition wizard (Step 1–3) */}
-          <Route
-            path="/requisitions/new"
-            element={
-              <PrivateRoute>
-                <RequisitionsLayout>
-                  <RequisitionWizard />
-                </RequisitionsLayout>
-              </PrivateRoute>
-            }
-          />
-
-          {/* Requisition edit (⟵ moved inside PrivateRoute + Layout) */}
-          <Route
-            path="/requisitions/edit/:id"
-            element={
-              <PrivateRoute>
-                <RequisitionsLayout>
-                  <RequisitionEdit />
-                </RequisitionsLayout>
-              </PrivateRoute>
-            }
-          />
-
-          <Route
-            path="/reports"
-            element={
-              <PrivateRoute roles={['admin', 'superuser']}>
-                <Reports />
-              </PrivateRoute>
-            }
-          />
-
-          {/* Requisition detail */}
-          <Route
-            path="/requisitions/:id"
-            element={
-              <PrivateRoute>
-                <RequisitionsLayout>
-                  <RequisitionDetail />
-                </RequisitionsLayout>
-              </PrivateRoute>
-            }
-          />
-
-          {/* 404 */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Outlet />
       </main>
-      {!hideNavbar && <Footer />}
-      <ToastNotification />
+      <Footer />
     </div>
   );
+}
+
+/* Root redirect: if logged in → /requisitions; else → /login */
+function RootRedirect() {
+  const { token } = useContext(AuthContext);
+  return token ? <Navigate to="/requisitions" replace /> : <Navigate to="/login" replace />;
 }
 
 export default function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <Layout />
+        <Routes>
+          {/* Root redirect based on auth */}
+          <Route path="/" element={<RootRedirect />} />
+
+          {/* Public routes under global Navbar/Footer */}
+          <Route element={<PublicLayout />}>
+            <Route path="/about" element={<About />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/password-reset-request" element={<PasswordResetRequest />} />
+            <Route path="/password-reset-confirm/:uid/:token" element={<ChangePassword />} />
+            <Route path="/change-password" element={<ChangePassword />} />
+          </Route>
+
+          {/* Private routes that SHARE the same Navbar + Sidebar (RequisitionsLayout) */}
+          <Route
+            element={
+              <PrivateRoute>
+                <RequisitionsLayout />
+              </PrivateRoute>
+            }
+          >
+            <Route path="/requisitions" element={<RequisitionsList />} />
+            <Route path="/requisitions/new" element={<RequisitionWizard />} />
+            <Route path="/requisitions/edit/:id" element={<RequisitionEdit />} />
+            <Route path="/requisitions/:id" element={<RequisitionDetail />} />
+            {/* ✅ Reports now uses the same layout (same Navbar/Sidebar) */}
+            <Route path="/reports" element={<Reports />} />
+          </Route>
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+
+        {/* Toasts mounted once at root */}
+        <ToastNotification />
       </AuthProvider>
     </ToastProvider>
   );
