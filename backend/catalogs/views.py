@@ -14,7 +14,15 @@ from .serializers import (
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.all()
     serializer_class = DepartmentSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    # Remove the hard IsAuthenticated here and handle it per method:
+    # permission_classes = [permissions.IsAuthenticated]
+
+    def get_permissions(self):
+        # Allow anyone to read (for registration form)
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [permissions.AllowAny()]
+        # Only admins can create/update/delete via API
+        return [permissions.IsAdminUser()]
 
 class ProjectViewSet(viewsets.ModelViewSet):
     queryset = Project.objects.all()
