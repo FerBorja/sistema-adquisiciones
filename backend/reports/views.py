@@ -107,13 +107,14 @@ class RequisitionSummaryPDFView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        import io
+        import io, os
+        from django.conf import settings
         from reportlab.lib.pagesizes import letter
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from datetime import datetime
 
         # --- 1) Datos para las 3 gráficas ---
-        # Barras por Departamento
         by_dept = (
             Requisition.objects
             .values('requesting_department__name')
@@ -125,7 +126,6 @@ class RequisitionSummaryPDFView(APIView):
             'total': row['total'],
         } for row in by_dept]
 
-        # Serie mensual por Departamento (con filtros)
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         queryset = Requisition.objects.all()
@@ -147,7 +147,6 @@ class RequisitionSummaryPDFView(APIView):
             'total': row['total'],
         } for row in by_month_dept]
 
-        # Pastel por Categoría
         by_cat = (
             Requisition.objects
             .values('category__name')
@@ -156,14 +155,67 @@ class RequisitionSummaryPDFView(APIView):
         )
         pie_rows = list(by_cat)
 
-        # --- 2) Render de imágenes en memoria ---
+        # --- 2) Render de imágenes ---
         bar_png  = chart_bar_by_department(bar_rows)
         line_png = chart_line_month_by_department(line_rows)
         pie_png  = chart_pie_by_category(pie_rows)
 
-        # --- 3) Construcción del PDF (una gráfica por página) ---
+        # --- 3) Construcción del PDF con header/footer ---
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=letter, title="Resumen de Requisiciones")
+
+        left_margin, right_margin = 40, 40
+        top_margin, bottom_margin = 100, 90
+        page_w, page_h = letter
+        logo_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'uach_logo.png')
+
+        # Header/Footer
+        def draw_page(c, doc):
+            # Encabezado
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(left_margin, page_h - 50, "Sistema Integral de Adquisiciones FING")
+            c.setFont("Helvetica", 12)
+            c.drawString(left_margin, page_h - 70, "Universidad Autónoma de Chihuahua — Reportes")
+            try:
+                if os.path.exists(logo_path):
+                    c.drawImage(
+                        logo_path,
+                        x=page_w - right_margin - 120,
+                        y=page_h - 85,
+                        width=110,
+                        height=45,
+                        preserveAspectRatio=True,
+                        mask='auto'
+                    )
+            except Exception:
+                pass
+            c.line(left_margin, page_h - 90, page_w - right_margin, page_h - 90)
+
+            # Pie
+            address_lines = [
+                "FACULTAD DE INGENIERÍA",
+                "Circuito No. 1, Campus Universitario 2",
+                "Chihuahua, Chih. México. C.P. 31125",
+                "Tel. (614) 442-95-00",
+                "www.uach.mx/fing",
+            ]
+            c.setFont("Helvetica", 9)
+            for i, line in enumerate(address_lines):
+                c.drawString(left_margin, 105 - i * 12, line)
+
+            c.setFont("Helvetica-Oblique", 8)
+            print_date = datetime.now().strftime("%d/%m/%Y %H:%M")
+            c.drawString(left_margin, 40, f"Generado automáticamente — Fecha de impresión: {print_date}")
+            c.drawRightString(page_w - right_margin, 40, f"Página {c.getPageNumber()}")
+
+        # Documento
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=letter,
+            leftMargin=left_margin, rightMargin=right_margin,
+            topMargin=top_margin, bottomMargin=bottom_margin,
+            title="Resumen de Requisiciones"
+        )
+
         styles = getSampleStyleSheet()
         h1 = styles['Heading1']
         h2 = styles['Heading2']
@@ -171,18 +223,17 @@ class RequisitionSummaryPDFView(APIView):
 
         story = []
 
-        # Página 1: Barras por Departamento
+        # Página 1
         story.append(Paragraph("Resumen de Requisiciones", h1))
         if start_date or end_date:
             story.append(Paragraph(f"Rango: {start_date or '—'} a {end_date or '—'}", small))
         story.append(Spacer(1, 6))
         story.append(Paragraph("Requisiciones por Departamento", h2))
         story.append(Spacer(1, 6))
-        # ancho alto pensados para letter vertical y márgenes por defecto
         story.append(Image(bar_png, width=540, height=300))
         story.append(PageBreak())
 
-        # Página 2: Serie mensual por Departamento
+        # Página 2
         story.append(Paragraph("Resumen de Requisiciones", h1))
         if start_date or end_date:
             story.append(Paragraph(f"Rango: {start_date or '—'} a {end_date or '—'}", small))
@@ -192,7 +243,7 @@ class RequisitionSummaryPDFView(APIView):
         story.append(Image(line_png, width=540, height=300))
         story.append(PageBreak())
 
-        # Página 3: Pastel por Categoría
+        # Página 3
         story.append(Paragraph("Resumen de Requisiciones", h1))
         if start_date or end_date:
             story.append(Paragraph(f"Rango: {start_date or '—'} a {end_date or '—'}", small))
@@ -201,10 +252,11 @@ class RequisitionSummaryPDFView(APIView):
         story.append(Spacer(1, 6))
         story.append(Image(pie_png, width=420, height=420))
 
-        doc.build(story)
+        # Con header/footer en todas las páginas
+        doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
-
 
 class ReportsViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAdminUser]
