@@ -23,12 +23,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+
 def _fig_to_png_bytesio(fig, dpi=150):
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
     return buf
+
 
 def chart_pie_by_status(status_rows):
     """
@@ -43,6 +45,7 @@ def chart_pie_by_status(status_rows):
     ax.pie(values, labels=labels, autopct='%1.1f%%')
     ax.set_title("Distribución por Estatus")
     return _fig_to_png_bytesio(fig)
+
 
 # ---------- helpers no visuales ----------
 _PLACEHOLDER_SUBSTRINGS = {
@@ -165,14 +168,11 @@ def _compute_kpis(requisitions):
     for r in requisitions:
         total += 1
         status_counter[str(getattr(r, 'status', '') or '').strip().lower() or '—'] += 1
-        # Departamento
         dep = _get(r, 'requesting_department')
         dep_name = _as_text(dep, ['name', 'descripcion', 'description', 'label']) or '—'
         dept_counter[dep_name] += 1
 
-    # status rows
     status_rows = [{'name': k, 'value': v} for k, v in status_counter.items()]
-    # top5 departamentos
     top5 = dept_counter.most_common(5)
     dept_rows = [{'requesting_department': name, 'total': count} for name, count in top5]
 
@@ -194,21 +194,17 @@ def _build_dashboard_story(kpis, logo_path):
 
     story = []
 
-    # Encabezado
     story.append(Paragraph("Reporte Detallado de Requisiciones", h1))
     story.append(Paragraph("Facultad de Ingeniería — Universidad Autónoma de Chihuahua", normal))
     story.append(Spacer(1, 8))
 
-    # KPIs
     total = kpis['total']
     st = {r['name']: r['value'] for r in kpis['status_rows']}
     def getv(key): return st.get(key, 0)
 
-    # 🔹 TÍTULO requerido para la PRIMERA TABLA
     story.append(Paragraph("Estatus general de requisiciones", h2))
     story.append(Spacer(1, 4))
 
-    # Tabla simple de KPIs
     kpi_data = [
         ["Total", str(total), "Pending", str(getv('pending')), "Approved", str(getv('approved'))],
         ["Registered", str(getv('registered')), "Completed", str(getv('completed')), "Sent", str(getv('sent'))],
@@ -227,43 +223,43 @@ def _build_dashboard_story(kpis, logo_path):
     story.append(kpi_table)
     story.append(Spacer(1, 10))
 
-    # Gráficas
-    from .pdf_generator import chart_pie_by_status  # si ya está arriba, puedes quitar esta línea
     pie_png = chart_pie_by_status(kpis['status_rows'])
     bar_dept_png = chart_bar_by_department(kpis['dept_rows_top5'])
+
+    story.append(PageBreak())
 
     story.append(Paragraph("Distribución por Estatus", h2))
     story.append(Image(pie_png, width=260, height=260))
     story.append(Spacer(1, 8))
 
+    story.append(PageBreak())
+
     story.append(Paragraph("Top 5 Departamentos por Volumen", h2))
     story.append(Image(bar_dept_png, width=520, height=240))
     story.append(Spacer(1, 12))
 
-    # Salto de página antes de la parte tabular
     story.append(PageBreak())
-
     return story
 
 
-
-# ---------- generator (tabla detallada, ahora agrupada por Departamento) ----------
+# ---------- generator (tabla detallada, ahora con header/footer en todas las páginas) ----------
 def generate_requisition_report_pdf(requisitions):
     """
     Genera un PDF DETALLADO con:
       1) Portada tipo dashboard (KPIs + gráficas)
       2) Tabla detallada de requisiciones agrupada por Departamento
+      3) Encabezado y pie de página repetidos en TODAS las páginas
     """
 
     buffer = io.BytesIO()
 
-    # Página y márgenes
-    PAGE = landscape(letter)  # horizontal para dar más ancho a la tabla
+    # Página y márgenes (landscape)
+    PAGE = landscape(letter)
     page_w, page_h = PAGE
     left_margin = 40
     right_margin = 40
-    top_margin = 60
-    bottom_margin = 60
+    top_margin = 100   # deja espacio para el encabezado
+    bottom_margin = 90 # deja espacio para el pie
 
     # Styles
     styles = getSampleStyleSheet()
@@ -277,6 +273,47 @@ def generate_requisition_report_pdf(requisitions):
     style_title = ParagraphStyle('title', parent=styles['Heading2'], alignment=TA_LEFT, fontSize=13, spaceAfter=10)
 
     logo_path = os.path.join(settings.BASE_DIR, 'staticfiles', 'uach_logo.png')
+
+    # --- Header/Footer para TODAS las páginas ---
+    def draw_page(c, doc):
+        # Encabezado
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(left_margin, page_h - 50, "Sistema Integral de Adquisiciones FING")
+        c.setFont("Helvetica", 12)
+        c.drawString(left_margin, page_h - 70, "Universidad Autónoma de Chihuahua — Reportes")
+        # Logo
+        try:
+            if os.path.exists(logo_path):
+                c.drawImage(
+                    logo_path,
+                    x=page_w - right_margin - 120,
+                    y=page_h - 85,
+                    width=110,
+                    height=45,
+                    preserveAspectRatio=True,
+                    mask='auto'
+                )
+        except Exception:
+            pass
+        # Línea separadora
+        c.line(left_margin, page_h - 90, page_w - right_margin, page_h - 90)
+
+        # Pie de página: dirección + fecha + número de página
+        address_lines = [
+            "FACULTAD DE INGENIERÍA",
+            "Circuito No. 1, Campus Universitario 2",
+            "Chihuahua, Chih. México. C.P. 31125",
+            "Tel. (614) 442-95-00",
+            "www.uach.mx/fing",
+        ]
+        c.setFont("Helvetica", 9)
+        for i, line in enumerate(address_lines):
+            c.drawString(left_margin, 105 - i * 12, line)
+
+        c.setFont("Helvetica-Oblique", 8)
+        print_date = datetime.now().strftime("%d/%m/%Y %H:%M")
+        c.drawString(left_margin, 40, f"Generado automáticamente — Fecha de impresión: {print_date}")
+        c.drawRightString(page_w - right_margin, 40, f"Página {c.getPageNumber()}")
 
     # Documento
     doc = SimpleDocTemplate(
@@ -292,7 +329,6 @@ def generate_requisition_report_pdf(requisitions):
     story = _build_dashboard_story(kpis, logo_path)
 
     # ---- 2) Detalle agrupado por Departamento ----
-    # Agrupar por departamento
     reqs_by_dept = defaultdict(list)
     for req in requisitions:
         dname = _as_text(_get(req, 'requesting_department'), ['name', 'descripcion', 'description', 'label']) or 'Sin Departamento'
@@ -310,37 +346,28 @@ def generate_requisition_report_pdf(requisitions):
 
         table = Table(data, colWidths=col_widths, repeatRows=1, hAlign='LEFT')
         table.setStyle(TableStyle([
-            # encabezado
             ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
             ('TEXTCOLOR',  (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('FONTSIZE',   (0, 0), (-1, 0), 10),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
 
-            # cuerpo
             ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
             ('FONTSIZE', (0, 1), (-1, -1), 9),
             ('VALIGN',   (0, 1), (-1, -1), 'TOP'),
 
-            # compactar padding para que quepa mejor
             ('LEFTPADDING',  (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
             ('TOPPADDING',   (0, 0), (-1, -1), 3),
             ('BOTTOMPADDING',(0, 0), (-1, -1), 3),
 
-            # bordes finos
             ('GRID', (0, 0), (-1, -1), 0.4, colors.black),
         ]))
-        # Permite que la tabla se parta por filas entre páginas (default),
-        # y forzamos ajuste por filas largas (ya usas Paragraph con wordWrap).
         table.splitByRow = True
         return table
 
     for dept_name in sorted(reqs_by_dept.keys()):
-        # Título por departamento
         story.append(Paragraph(f"Departamento: {dept_name}", style_title))
-
-        # Tabla de requisiciones (encabezados)
         data = [["ID", "Fecha", "Usuario", "Departamento", "Proyecto", "Motivo", "Estado"]]
 
         for req in reqs_by_dept[dept_name]:
@@ -369,16 +396,13 @@ def generate_requisition_report_pdf(requisitions):
                 Paragraph(_escape(status_disp or '—'), cell_center),
             ])
 
-        # Anchos (horizontal: más espacio para “Motivo”)
-        available_width = doc.width  # respeta márgenes del SimpleDocTemplate
+        available_width = doc.width
         table = _make_dept_table(data, available_width)
-
-
-        # Añadir y separar cada bloque
         story.append(table)
         story.append(Spacer(1, 16))
 
-    # Build
-    doc.build(story)
+    # Build con header/footer en todas las páginas
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+
     buffer.seek(0)
     return buffer

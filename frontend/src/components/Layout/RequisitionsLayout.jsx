@@ -1,18 +1,18 @@
 // frontend/src/components/Layout/RequisitionsLayout.jsx
-import React from "react";
-import { Outlet, NavLink, useLocation } from "react-router-dom";
+import React, { useContext } from "react";
+import { Outlet, NavLink } from "react-router-dom";
 import Navbar from "./Navbar";
 import Footer from "./Footer";
+import { AuthContext } from "../../contexts/AuthContext";
 
 export default function RequisitionsLayout() {
-  const location = useLocation();
+  const { user } = useContext(AuthContext);
+  const isAdmin =
+    user?.is_superuser || user?.is_staff || ["admin", "superuser"].includes(user?.role);
 
-  // Default link style
-  const linkClass = (isActive) =>
+  // Helper que recibe { isActive } (objeto) de NavLink v6
+  const linkClasses = ({ isActive }) =>
     `px-3 py-2 rounded ${isActive ? "bg-indigo-600 text-white" : "hover:bg-gray-100"}`;
-
-  // Exact style for the base /requisitions route
-  const exactIsActiveForBase = location.pathname === "/requisitions";
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -21,28 +21,20 @@ export default function RequisitionsLayout() {
         <aside className="w-64 border-r p-4">
           <h2 className="text-xs font-semibold text-gray-500 mb-2">COMPRAS</h2>
           <nav className="flex flex-col gap-2">
-            <NavLink
-              to="/requisitions/new"
-              className={({ isActive }) => linkClass(isActive)}
-            >
+            <NavLink to="/requisitions/new" className={linkClasses}>
               Registro
             </NavLink>
 
-            {/* ✅ exact match only */}
-            <NavLink
-              to="/requisitions"
-              end
-              className={() => linkClass(exactIsActiveForBase)}
-            >
+            {/* match exacto para /requisitions */}
+            <NavLink to="/requisitions" end className={linkClasses}>
               Consulta | Autorizaciones
             </NavLink>
 
-            <NavLink
-              to="/reports"
-              className={({ isActive }) => linkClass(isActive)}
-            >
-              Reportes
-            </NavLink>
+            {isAdmin && (
+              <NavLink to="/reports" className={linkClasses}>
+                Reportes
+              </NavLink>
+            )}
           </nav>
         </aside>
 
