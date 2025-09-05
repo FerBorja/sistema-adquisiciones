@@ -13,6 +13,7 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.contrib.auth import get_user_model
 from rest_framework.views import APIView
+import os
 
 User = get_user_model()
 
@@ -58,7 +59,7 @@ class PasswordResetRequestView(generics.GenericAPIView):
         token = token_generator.make_token(user)
         uid = urlsafe_base64_encode(force_bytes(user.pk))
 
-        frontend_base_url = "http://localhost:3000"  # Change to your production frontend URL
+        frontend_base_url = "http://localhost:3000/#"  # Change to your production frontend URL
         reset_url = f"{frontend_base_url}/change-password?uid={uid}&token={token}"
 
         # Send email
