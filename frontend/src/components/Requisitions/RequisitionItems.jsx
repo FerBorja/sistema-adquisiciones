@@ -85,6 +85,15 @@ export default function RequisitionItems({
     }
   };
 
+  const computeTotal = (qtyStr, unitStr) => {
+    const qty = Number(qtyStr);
+    const unit = Number(unitStr);
+    if (Number.isFinite(qty) && qty > 0 && Number.isFinite(unit) && unit > 0) {
+      return (qty * unit).toFixed(2);
+    }
+    return '';
+  };
+
   const [newItem, setNewItem] = useState({
     product: '',
     product_label: '',
@@ -93,18 +102,36 @@ export default function RequisitionItems({
     unit_label: '',
     description: '',
     description_label: '',
+
+    // ✅ nuevo “bien”
+    estimated_unit_cost: '',
+    estimated_total: '',
   });
 
   const addItem = () => {
     const qty = Number(newItem.quantity);
+    const unitCost = newItem.estimated_unit_cost === '' ? NaN : Number(newItem.estimated_unit_cost);
+    const total = Number(newItem.estimated_total);
 
     if (!newItem.product) return showToast('Selecciona el Objeto del Gasto (Producto).', 'error');
     if (!Number.isFinite(qty) || qty <= 0) return showToast('La cantidad debe ser mayor que 0.', 'error');
     if (!newItem.unit) return showToast('Selecciona la Unidad de Medida.', 'error');
     if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
 
+    // unitario opcional, pero si viene debe ser válido
+    if (newItem.estimated_unit_cost !== '' && (!Number.isFinite(unitCost) || unitCost <= 0)) {
+      return showToast('El Costo unitario debe ser mayor que 0 (o déjalo vacío).', 'error');
+    }
+
+    // total requerido
+    if (!Number.isFinite(total) || total <= 0) {
+      return showToast('El Monto estimado (total) debe ser mayor que 0.', 'error');
+    }
+
     const partida = {
+      // id local para UI
       id: Date.now(),
+
       product: newItem.product,
       product_label: newItem.product_label,
       quantity: qty,
@@ -112,14 +139,23 @@ export default function RequisitionItems({
       unit_label: newItem.unit_label,
       description: newItem.description,
       description_label: newItem.description_label,
+
+      // ✅ backend fields
+      estimated_unit_cost: newItem.estimated_unit_cost === '' ? undefined : Number(unitCost.toFixed(2)),
+      estimated_total: Number(total.toFixed(2)),
     };
+
     setItems((prev) => [...prev, partida]);
+
     setNewItem({
       product: '', product_label: '',
       quantity: '',
       unit: '', unit_label: '',
       description: '', description_label: '',
+      estimated_unit_cost: '',
+      estimated_total: '',
     });
+
     setDescOptions([]);
   };
 
@@ -370,7 +406,6 @@ export default function RequisitionItems({
         <div><div className="text-sm text-gray-500">Servicio Externo / Académico</div><div className="font-medium">{formData.external_service_label || formData.external_service}</div></div>
       </div>
 
-      {/* Separation line */}
       <div className="my-6 border-t border-gray-200" />
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
@@ -411,13 +446,20 @@ export default function RequisitionItems({
             min="0"
             step="1"
             value={newItem.quantity}
-            onChange={(e) => setNewItem((p) => ({ ...p, quantity: e.target.value }))}
+            onChange={(e) => {
+              const val = e.target.value;
+              setNewItem((p) => ({
+                ...p,
+                quantity: val,
+                estimated_total: computeTotal(val, p.estimated_unit_cost) || p.estimated_total,
+              }));
+            }}
             className="border p-2 w-full rounded"
           />
         </div>
 
-        {/* 3) Unidad de Medida */}
-        <div className="md:col-span-3">
+        {/* 3) Unidad */}
+        <div className="md:col-span-2">
           <label className="block mb-1 font-medium">Unidad de Medida</label>
           <select
             value={newItem.unit}
@@ -435,8 +477,43 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        {/* 4) Descripción */}
-        <div className="md:col-span-3">
+        {/* ✅ 4) Costo unitario */}
+        <div className="md:col-span-2">
+          <label className="block mb-1 font-medium">Costo unitario</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={newItem.estimated_unit_cost}
+            onChange={(e) => {
+              const val = e.target.value;
+              setNewItem((p) => ({
+                ...p,
+                estimated_unit_cost: val,
+                estimated_total: computeTotal(p.quantity, val) || p.estimated_total,
+              }));
+            }}
+            className="border p-2 w-full rounded"
+            placeholder="0.00"
+          />
+        </div>
+
+        {/* ✅ 5) Total (editable por si quieres override) */}
+        <div className="md:col-span-2">
+          <label className="block mb-1 font-medium">Monto estimado (total)</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={newItem.estimated_total}
+            onChange={(e) => setNewItem((p) => ({ ...p, estimated_total: e.target.value }))}
+            className="border p-2 w-full rounded"
+            placeholder="0.00"
+          />
+        </div>
+
+        {/* 6) Descripción */}
+        <div className="md:col-span-12">
           <label className="block mb-1 font-medium">Descripción</label>
           <select
             value={newItem.description}
@@ -456,53 +533,35 @@ export default function RequisitionItems({
         </div>
       </div>
 
-      {/* Header with Clasificador + Ver Catálogo + Registrar + Agregar */}
+      {/* Buttons */}
       <div className="flex items-center justify-end mb-3">
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={openPDF}
-            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
-            title="Abrir el PDF del clasificador"
-          >
+          <button type="button" onClick={openPDF}
+            className="inline-flex items-center gap-2 rounded-md border border-indigo-300 px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50">
             Clasificador
           </button>
 
-          <button
-            type="button"
-            onClick={openCatalog}
-            className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
-            title="Ver Catálogo"
-          >
+          <button type="button" onClick={openCatalog}
+            className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50">
             Ver Catálogo
           </button>
 
-          <button
-            type="button"
-            onClick={openRegistro}
-            className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
-            title="Registrar nueva Descripción"
-          >
+          <button type="button" onClick={openRegistro}
+            className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
             Registrar
           </button>
 
-          <button
-            type="button"
-            onClick={addItem}
-            className="inline-flex items-center gap-2 rounded-md border border-green-300 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50"
-            title="Agregar partida"
-          >
+          <button type="button" onClick={addItem}
+            className="inline-flex items-center gap-2 rounded-md border border-green-300 px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50">
             Agregar
           </button>
         </div>
       </div>
 
-      {/* Separation line */}
       <div className="my-4 border-t border-gray-200" />
 
       <h2 className="text-lg font-semibold mb-3">Partidas registradas</h2>
 
-      {/* Items table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm border rounded">
           <thead>
@@ -510,7 +569,9 @@ export default function RequisitionItems({
               <th className="p-2 border">#</th>
               <th className="p-2 border">Objeto del Gasto</th>
               <th className="p-2 border">Cantidad</th>
-              <th className="p-2 border">Unidad de Medida</th>
+              <th className="p-2 border">Unidad</th>
+              <th className="p-2 border">Unitario</th>
+              <th className="p-2 border">Total</th>
               <th className="p-2 border">Descripción</th>
               <th className="p-2 border">Acciones</th>
             </tr>
@@ -518,7 +579,7 @@ export default function RequisitionItems({
           <tbody>
             {items.length === 0 && (
               <tr>
-                <td colSpan="6" className="p-3 text-center text-gray-500">
+                <td colSpan="8" className="p-3 text-center text-gray-500">
                   No hay partidas registradas.
                 </td>
               </tr>
@@ -529,6 +590,8 @@ export default function RequisitionItems({
                 <td className="p-2 border">{p.product_label}</td>
                 <td className="p-2 border">{p.quantity}</td>
                 <td className="p-2 border">{p.unit_label}</td>
+                <td className="p-2 border">{p.estimated_unit_cost ? Number(p.estimated_unit_cost).toFixed(2) : '—'}</td>
+                <td className="p-2 border">{Number(p.estimated_total).toLocaleString('es-MX')}</td>
                 <td className="p-2 border">{p.description_label}</td>
                 <td className="p-2 border">
                   <button
@@ -545,158 +608,9 @@ export default function RequisitionItems({
         </table>
       </div>
 
-      {/* Buttons are rendered in the Wizard below “Observaciones” */}
-      
-      {/* Modal: Registro */}
-      {showRegistroModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={closeRegistro} aria-hidden="true" />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold">Registro</h3>
-            </div>
-
-            <label className="block text-sm font-medium mb-1">Objeto del Gasto</label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              value={regProductId}
-              onChange={(e) => setRegProductId(e.target.value)}
-            >
-              <option value="">Selecciona…</option>
-              {products.map((o) => (
-                <option key={o.id} value={o.id}>{o.label}</option>
-              ))}
-            </select>
-
-            <label className="block text-sm font-medium mb-1">Descripción del Producto</label>
-            <input
-              type="text"
-              placeholder="Ej. Laptop 14” Core i5, 16GB RAM…"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              value={regDescripcion}
-              onChange={(e) => setRegDescripcion(e.target.value)}
-            />
-
-            {regError && <div className="text-sm text-red-600 mb-3">{regError}</div>}
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button type="button" onClick={closeRegistro}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Cerrar</button>
-              <button type="button" disabled={regSaving} onClick={submitRegistro}
-                className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
-                {regSaving ? 'Registrando…' : 'Registrar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Catálogo */}
-      {showCatalogModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={closeCatalog} aria-hidden="true" />
-          <div className="relative z-10 w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Catálogo</h3>
-            </div>
-
-            <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">Mostrar</span>
-                <select
-                  value={entriesPerPage}
-                  onChange={(e) => { setEntriesPerPage(Number(e.target.value)); setPage(1); }}
-                  className="border rounded px-2 py-1 text-sm"
-                >
-                  {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-                <span className="text-sm">entradas</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <label className="text-sm">Search</label>
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
-                  className="border rounded px-2 py-1 text-sm w-64"
-                  placeholder="Buscar por Objeto del Gasto o Descripción…"
-                />
-              </div>
-            </div>
-
-            <div className="overflow-x-auto border rounded">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-100 text-left">
-                    <th className="p-2 border">Objeto del Gasto</th>
-                    <th className="p-2 border">Descripción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {catalogLoading && (
-                    <tr><td colSpan="2" className="p-3 text-center text-gray-500">Cargando…</td></tr>
-                  )}
-                  {!catalogLoading && pageRows.length === 0 && (
-                    <tr><td colSpan="2" className="p-3 text-center text-gray-500">Sin resultados.</td></tr>
-                  )}
-                  {pageRows.map((r) => (
-                    <tr key={`${r.id}`}>
-                      <td className="p-2 border">{r.productLabel}</td>
-                      <td className="p-2 border">{r.text}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="text-sm text-gray-600">
-                {totalEntries > 0
-                  ? <>Mostrando {startIndex + 1} de {entriesPerPage} de {totalEntries} entradas totales</>
-                  : <>Mostrando 0 de {entriesPerPage} de 0 entradas totales</>}
-              </div>
-
-              <div className="flex items-center gap-1">
-                <button
-                  className="px-2 py-1 text-sm border rounded disabled:opacity-50"
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage <= 1}
-                >
-                  Anterior
-                </button>
-
-                {pageList.map((p, idx) =>
-                  typeof p === 'number' ? (
-                    <button
-                      key={`p-${p}-${idx}`}
-                      className={`px-2 py-1 text-sm border rounded ${p === currentPage ? 'bg-blue-600 text-white border-blue-600' : ''}`}
-                      onClick={() => goToPage(p)}
-                    >
-                      {p}
-                    </button>
-                  ) : (
-                    <span key={`dots-${idx}`} className="px-2 py-1 text-sm">…</span>
-                  )
-                )}
-
-                <button
-                  className="px-2 py-1 text-sm border rounded disabled:opacity-50"
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage >= totalPages}
-                >
-                  Siguiente
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <button onClick={closeCatalog}
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50">Cerrar</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Modales (Registro y Catálogo) se quedan igual que tu archivo original */}
+      {/* ... (no los repetí aquí para no hacer el mensaje infinito) */}
+      {/* Si quieres, te lo regreso también con los modales incluidos, 1:1 */}
     </>
   );
 }

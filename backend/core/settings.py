@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from datetime import timedelta
 import warnings
 
+from corsheaders.defaults import default_headers  # ✅ NUEVO
+
 load_dotenv()  # Cargar variables de entorno
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -28,9 +30,6 @@ assert SECRET_KEY, "SECRET_KEY no está definido en .env"
 DB_VARS = ["DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT"]
 for var in DB_VARS:
     assert os.getenv(var), f"{var} no está definido en .env"
-
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True") == "True"
@@ -46,50 +45,45 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
 else:
-    # Opcional: configuraciones para desarrollo
     SECURE_SSL_REDIRECT = False
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'tu-dominio.com', 'www.tu-dominio.com']
 
-
-
 # Application definition
-
 INSTALLED_APPS = [
+    "corsheaders",  # ✅ Recomendado: arriba
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
     'rest_framework',
     'rest_framework_simplejwt',
-    'users',    
-    'requisitions',
-    'corsheaders',
     'rest_framework_simplejwt.token_blacklist',
+
+    'users',
+    'requisitions',
     'catalogs',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',    
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "corsheaders.middleware.CorsMiddleware",  # ✅ Debe ir arriba (antes de CommonMiddleware)
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = 'core.urls'
-
 WSGI_APPLICATION = 'core.wsgi.application'
 
-
 # Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
@@ -101,48 +95,30 @@ DATABASES = {
     }
 }
 
-
 # Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
-
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-
 # Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
-
 LANGUAGE_CODE = 'es-mx'
-
 TIME_ZONE = 'America/Chihuahua'
-
 USE_I18N = True
-
 USE_TZ = True
 
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/howto/static-files/
-
+# Static files
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# DRF
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -160,7 +136,7 @@ REST_FRAMEWORK = {
         'password_reset': '3/hour',
         'registration': '5/hour',
     },
-    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],            
+    'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
 }
 
 AUTH_USER_MODEL = 'users.User'
@@ -169,6 +145,7 @@ AUTHENTICATION_BACKENDS = (
     'django.contrib.auth.backends.ModelBackend',
 )
 
+# Email
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'
 EMAIL_PORT = 587
@@ -193,22 +170,44 @@ if not EMAIL_HOST_USER or not EMAIL_HOST_PASSWORD:
 
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
+# JWT
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
     'BLACKLIST_AFTER_ROTATION': True,
     'ROTATE_REFRESH_TOKENS': True,
-    # otras configuraciones opcionales
 }
 
-CORS_ALLOW_ALL_ORIGINS = False  # más seguro
-cors_origins = os.getenv("CORS_ALLOWED_ORIGINS")
-if cors_origins:
-    CORS_ALLOWED_ORIGINS = cors_origins.split(",")
-else:
-    CORS_ALLOWED_ORIGINS = ["http://localhost:5173"]
+# =========================
+# ✅ CORS (AQUÍ ESTÁ LO NUEVO)
+# =========================
+CORS_ALLOW_ALL_ORIGINS = False
 
-STATIC_ROOT = BASE_DIR / "staticfiles"
+cors_origins = os.getenv("CORS_ALLOWED_ORIGINS")
+
+def _clean_origin(o: str) -> str:
+    return o.strip().strip('"').strip("'")
+
+if cors_origins:
+    CORS_ALLOWED_ORIGINS = [_clean_origin(o) for o in cors_origins.split(",") if _clean_origin(o)]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+# ✅ Alias por compatibilidad
+CORS_ORIGIN_WHITELIST = CORS_ALLOWED_ORIGINS
+
+# ✅ Headers permitidos (preflight + JWT)
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "authorization",
+    "content-type",
+]
+
+# Templates
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -223,11 +222,8 @@ TEMPLATES = [
         },
     },
 ]
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
 # Logging configuration
-
 LOG_DIR = BASE_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -254,11 +250,11 @@ LOGGING = {
             'filename': BASE_DIR / 'logs/django.log',
             'formatter': 'verbose',
         },
-        },
+    },
     'loggers': {
         'django': {
             'handlers': ['console', 'file'],
-            'level': 'INFO',  # or WARNING or ERROR instead of DEBUG
+            'level': 'INFO',
             'propagate': True,
         },
         'django.request': {

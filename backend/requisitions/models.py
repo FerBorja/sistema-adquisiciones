@@ -1,5 +1,8 @@
-from django.db import models
+from decimal import Decimal
+
 from django.conf import settings
+from django.core.validators import MinValueValidator
+from django.db import models
 from django.db.models.functions import Lower
 
 User = settings.AUTH_USER_MODEL
@@ -85,6 +88,15 @@ class ItemDescription(models.Model):
     product = models.ForeignKey('Product', on_delete=models.CASCADE, related_name='descriptions')
     text = models.CharField(max_length=255)
 
+    # ✅ costo estimado unitario (catálogo de precios)
+    estimated_unit_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -104,6 +116,7 @@ class Requisition(models.Model):
         ('completed', 'Completed'),
         ('sent', 'Sent to Central Unit'),
         ('received', 'Received by Admin Office'),
+        ('cancelled', 'Cancelled'),  # ✅ NUEVO
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -125,6 +138,20 @@ class Requisition(models.Model):
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='registered')
     observations = models.TextField(blank=True, null=True)
 
+    # ✅ confirmación “costo aproximado pero realista”
+    ack_cost_realistic = models.BooleanField(default=False)
+
+    # ✅ cancelación (admin)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancelled_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancelled_requisitions"
+    )
+    cancel_reason = models.TextField(null=True, blank=True)
+
     class Meta:
         verbose_name = "Requisition"
         verbose_name_plural = "Requisitions"
@@ -139,8 +166,47 @@ class RequisitionItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)  # "Objeto del Gasto"
     quantity = models.PositiveIntegerField()
     unit = models.ForeignKey(UnitOfMeasurement, on_delete=models.PROTECT)
-    # AHORA: 'description' es FK al nuevo catálogo ItemDescription
     description = models.ForeignKey(ItemDescription, on_delete=models.PROTECT)
+
+    # ✅ monto por renglón (obligatorio)
+    estimated_total = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+
+    # ✅ opcional: unitario estimado
+    estimated_unit_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+
+    # ✅ admin: monto real (trazabilidad)
+    real_total = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    real_unit_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+    real_updated_at = models.DateTimeField(null=True, blank=True)
+    real_updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="real_amount_updates"
+    )
 
     class Meta:
         verbose_name = "Requisition Item"

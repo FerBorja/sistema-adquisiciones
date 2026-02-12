@@ -54,7 +54,7 @@ export default function RequisitionWizard() {
   const [items, setItems] = useState([]);
   const [requisitionNumber, setRequisitionNumber] = useState('');
   const [observaciones, setObservaciones] = useState('');
-  const [saving, setSaving] = useState(false); // <-- for Guardar button state
+  const [saving, setSaving] = useState(false);
 
   // --- Fetch Departments to resolve requesting_department ID ---
   const [departments, setDepartments] = useState([]);
@@ -113,8 +113,31 @@ export default function RequisitionWizard() {
     setStep(2);
   };
 
+  // ===== Helpers =====
+  const idOrUndef = (v) =>
+    v === '' || v === null || typeof v === 'undefined' ? undefined : Number(v);
+
+  const strOrUndef = (v) => {
+    const s = (v ?? '').toString().trim();
+    return s.length ? s : undefined;
+  };
+
+  const compact = (obj) =>
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v !== 'undefined'));
+
+  // Convierte "$ 1,234.50" / "1234.50" / "1,234.50" -> Number
+  const parseMoney = (v) => {
+    if (v === null || typeof v === 'undefined') return NaN;
+    if (typeof v === 'number') return v;
+    const s = String(v).trim();
+    if (!s) return NaN;
+    // quita $ y espacios, quita comas de miles
+    const cleaned = s.replace(/\$/g, '').replace(/\s+/g, '').replace(/,/g, '');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : NaN;
+  };
+
   // ====== Guardar (create Requisition) from Step 2 ======
-  // Replace your handleFinishFromStep2 with this version
   const handleFinishFromStep2 = async () => {
     if (saving) return;
 
@@ -128,15 +151,6 @@ export default function RequisitionWizard() {
       return;
     }
 
-    // helper: convert empty -> undefined (so we can omit later)
-    const idOrUndef = (v) => (v === '' || v === null || typeof v === 'undefined' ? undefined : Number(v));
-    const strOrUndef = (v) => {
-      const s = (v ?? '').toString().trim();
-      return s.length ? s : undefined;
-    };
-    const compact = (obj) =>
-      Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v !== 'undefined'));
-
     // resolve department FK
     const deptId = findDepartmentId();
     if (!deptId) {
@@ -144,9 +158,59 @@ export default function RequisitionWizard() {
       return;
     }
 
+    // ✅ Validación de estimated_total por renglón (obligatorio y > 0)
+    // También soporta que puedas traer estimated_unit_cost y calcular el total si quieres.
+    const invalidLines = [];
+    const normalizedItems = items.map((it, idx) => {
+      const product = Number(it.product);
+      const quantity = Number(it.quantity);
+      const unit = Number(it.unit);
+      const description = Number(it.description);
+
+      // A) esperado: viene capturado en UI
+      let estimatedTotal = parseMoney(it.estimated_total);
+
+      // B) opcional: si no viene total pero viene unitario, calcula
+      if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
+        const unitCost = parseMoney(it.estimated_unit_cost);
+        if (Number.isFinite(unitCost) && unitCost > 0 && Number.isFinite(quantity) && quantity > 0) {
+          estimatedTotal = Number((unitCost * quantity).toFixed(2));
+        }
+      }
+
+      if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
+        invalidLines.push(idx + 1); // renglón humano (1-based)
+      }
+
+      const payloadItem = {
+        product,
+        quantity,
+        unit,
+        description,
+        // ✅ NUEVO: obligatorio
+        estimated_total: estimatedTotal,
+      };
+
+      // opcional (si lo traes): guardar unitario también
+      const unitCost = parseMoney(it.estimated_unit_cost);
+      if (Number.isFinite(unitCost) && unitCost > 0) {
+        payloadItem.estimated_unit_cost = Number(unitCost.toFixed(2));
+      }
+
+      return payloadItem;
+    });
+
+    if (invalidLines.length) {
+      showToast(
+        `Falta "Monto estimado" válido (> 0) en los renglones: ${invalidLines.join(', ')}`,
+        'error'
+      );
+      return;
+    }
+
     // build payload – omit empty/undefined fields
     const base = {
-      requesting_department: deptId,                                // required
+      requesting_department: deptId, // required
       project: idOrUndef(formData.project),
       funding_source: idOrUndef(formData.funding_source),
       budget_unit: idOrUndef(formData.budget_unit),
@@ -154,15 +218,9 @@ export default function RequisitionWizard() {
       tender: idOrUndef(formData.tender),
       category: idOrUndef(formData.category),
       external_service: idOrUndef(formData.external_service),
-      requisition_reason: strOrUndef(formData.description),          // text
-      // observations is optional; only include if there’s text
+      requisition_reason: strOrUndef(formData.description),
       observations: strOrUndef(observaciones),
-      items: items.map(({ product, quantity, unit, description }) => ({
-        product: Number(product),
-        quantity: Number(quantity),
-        unit: Number(unit),
-        description: Number(description), // ItemDescription FK id
-      })),
+      items: normalizedItems,
     };
 
     const payload = compact(base);
@@ -171,18 +229,18 @@ export default function RequisitionWizard() {
       setSaving(true);
       await apiClient.post('requisitions/', payload);
       showToast(
-        `Requisición #${requisitionNumber} creada correctamente.${payload.observations ? ` Observaciones: ${payload.observations}` : ''}`,
+        `Requisición #${requisitionNumber} creada correctamente.${
+          payload.observations ? ` Observaciones: ${payload.observations}` : ''
+        }`,
         'success'
       );
       navigate('/requisitions');
     } catch (err) {
       console.error('Error creando requisición', err);
 
-      // Try to extract something readable even if server returned HTML
       const raw = err?.response?.data;
       let detail = '';
       if (typeof raw === 'string') {
-        // strip HTML if needed and shorten
         detail = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 500);
       } else if (raw && typeof raw === 'object') {
         detail = JSON.stringify(raw);
@@ -190,7 +248,6 @@ export default function RequisitionWizard() {
 
       showToast(`Error al crear requisición${detail ? `: ${detail}` : ''}`, 'error');
 
-      // Extra tip in console for you:
       console.warn(
         'If you recently added the "observations" field, make sure migrations ran and the serializer exposes it.'
       );
@@ -198,7 +255,6 @@ export default function RequisitionWizard() {
       setSaving(false);
     }
   };
-
 
   return (
     <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow">
@@ -214,12 +270,27 @@ export default function RequisitionWizard() {
           </form>
 
           <div className="flex justify-between mt-6 gap-2">
-            <button type="button" onClick={handleCancel}
-              className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded">Cancelar</button>
-            <button type="button" onClick={handleResetStep1}
-              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded">Borrar</button>
-            <button type="button" onClick={handleNextFromStep1}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Siguiente</button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleResetStep1}
+              className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded"
+            >
+              Borrar
+            </button>
+            <button
+              type="button"
+              onClick={handleNextFromStep1}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+            >
+              Siguiente
+            </button>
           </div>
         </>
       )}
@@ -246,7 +317,7 @@ export default function RequisitionWizard() {
             />
           </div>
 
-          {/* Bottom buttons (below Observaciones) */}
+          {/* Bottom buttons */}
           <div className="flex justify-end mt-6 gap-2">
             <button
               type="button"

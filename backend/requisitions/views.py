@@ -45,6 +45,38 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def export_pdf(self, request, pk=None):
         requisition = self.get_object()
+
+        # ✅ Candados antes de imprimir/exportar
+        if requisition.status == "cancelled":
+            return Response(
+                {"detail": "No se puede imprimir una requisición cancelada."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not requisition.ack_cost_realistic:
+            return Response(
+                {"detail": "Debes confirmar 'costo aproximado pero realista' antes de imprimir/exportar."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        items = requisition.items.all()
+        if not items.exists():
+            return Response(
+                {"detail": "No se puede imprimir/exportar una requisición sin renglones (items)."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        bad = []
+        for it in items:
+            if it.estimated_total is None or it.estimated_total <= 0:
+                bad.append(it.id)
+
+        if bad:
+            return Response(
+                {"detail": f"No se puede imprimir/exportar: hay renglones sin monto válido (estimated_total). Item IDs: {bad}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
             buf = generate_requisition_pdf(requisition)
             resp = HttpResponse(buf.getvalue(), content_type='application/pdf')
