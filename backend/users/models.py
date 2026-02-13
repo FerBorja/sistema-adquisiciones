@@ -2,7 +2,6 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, Permis
 from django.db import models
 from django.utils import timezone
 from django.core.exceptions import ValidationError
-import uuid
 from datetime import timedelta
 
 class UserManager(BaseUserManager):
@@ -31,7 +30,7 @@ class UserManager(BaseUserManager):
 
     def create_superuser(self, employee_number, first_name, last_name, extension_number, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)        
+        extra_fields.setdefault('is_superuser', True)
 
         if extra_fields.get('is_staff') is not True:
             raise ValueError('Superuser debe tener is_staff=True.')
@@ -75,18 +74,21 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return f"{self.employee_number} - {self.first_name} {self.last_name}"
-    
+
     @property
     def full_name(self):
         return f"{self.first_name} {self.last_name}"
 
     def clean(self):
-        if not self.extension_number.isdigit():
+        if self.extension_number and (not self.extension_number.isdigit()):
             raise ValidationError("El número de extensión debe contener solo dígitos.")
 
 class RegistrationCode(models.Model):
-    email = models.EmailField()
-    code = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    email = models.EmailField(db_index=True)
+
+    # ✅ NUEVO: 6 dígitos numéricos como string (con ceros a la izquierda)
+    code = models.CharField(max_length=6, unique=True, db_index=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     used = models.BooleanField(default=False)
 

@@ -65,8 +65,15 @@ export default function Register() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+
     if (formData.password !== formData.confirm_password) {
       showToast("Las contraseñas no coinciden", "error");
+      return;
+    }
+
+    // ✅ NUEVO: Validación código 6 dígitos
+    if (!/^\d{6}$/.test(String(formData.code || "").trim())) {
+      showToast("El código debe ser numérico de 6 dígitos.", "error");
       return;
     }
 
@@ -113,10 +120,14 @@ export default function Register() {
       <div className="bg-white shadow-2xl rounded-3xl p-10 max-w-md w-full ring-1 ring-indigo-100">
         {step === 1 && (
           <>
-            <h2 className="text-2xl font-semibold mb-4 text-gray-700 tracking-wide">Solicitar código de registro</h2>
+            <h2 className="text-2xl font-semibold mb-4 text-gray-700 tracking-wide">
+              Solicitar código de registro
+            </h2>
             <form onSubmit={handleSendCode} className="space-y-4">
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Email Universitario</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Email Universitario
+                </label>
                 <input
                   type="email"
                   name="email"
@@ -148,16 +159,27 @@ export default function Register() {
 
         {step === 2 && (
           <>
-            <h2 className="text-2xl font-extrabold mb-6 text-gray-700 tracking-wide">Completa el registro</h2>
+            <h2 className="text-2xl font-extrabold mb-6 text-gray-700 tracking-wide">
+              Completa el registro
+            </h2>
             <form onSubmit={handleRegister} className="space-y-4">
               {/* Código de registro */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Código de registro</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Código de registro
+                </label>
                 <input
                   type="text"
                   name="code"
                   value={formData.code}
-                  onChange={handleChange}
+                  onChange={(e) => {
+                    const onlyDigits = e.target.value.replace(/\D/g, "").slice(0, 6);
+                    setFormData((p) => ({ ...p, code: onlyDigits }));
+                  }}
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  placeholder="000000"
                   required
                   onInvalid={(e) => setRequiredMessage(e, "Por favor ingrese el código de registro")}
                   className="w-full border rounded p-2"
@@ -166,7 +188,9 @@ export default function Register() {
 
               {/* Número de empleado */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Número de empleado</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Número de empleado
+                </label>
                 <input
                   type="text"
                   name="employee_number"
@@ -180,7 +204,9 @@ export default function Register() {
 
               {/* Nombre */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Nombre</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Nombre
+                </label>
                 <input
                   type="text"
                   name="first_name"
@@ -194,7 +220,9 @@ export default function Register() {
 
               {/* Apellidos */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Apellidos</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Apellidos
+                </label>
                 <input
                   type="text"
                   name="last_name"
@@ -208,7 +236,9 @@ export default function Register() {
 
               {/* Departamento */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Departamento</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Departamento
+                </label>
                 <select
                   name="department"
                   value={formData.department}
@@ -228,7 +258,9 @@ export default function Register() {
 
               {/* Número de extensión */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Número de extensión</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Número de extensión
+                </label>
                 <input
                   type="text"
                   name="extension_number"
@@ -242,7 +274,9 @@ export default function Register() {
 
               {/* Contraseña */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Contraseña</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Contraseña
+                </label>
                 <input
                   type="password"
                   name="password"
@@ -256,7 +290,9 @@ export default function Register() {
 
               {/* Confirmar contraseña */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Confirmar Contraseña</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Confirmar Contraseña
+                </label>
                 <input
                   type="password"
                   name="confirm_password"
@@ -270,7 +306,9 @@ export default function Register() {
 
               {/* Imagen de perfil */}
               <div>
-                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">Imagen de perfil (opcional)</label>
+                <label className="block mb-2 font-semibold text-gray-700 tracking-wide">
+                  Imagen de perfil (opcional)
+                </label>
                 <input
                   type="file"
                   name="profile_picture"
