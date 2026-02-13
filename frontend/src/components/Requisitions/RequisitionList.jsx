@@ -15,7 +15,7 @@ export default function RequisitionList() {
     if (!value) return null;
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
     if (m) {
-      const [ , y, mo, d ] = m.map(Number);
+      const [, y, mo, d] = m.map(Number);
       return new Date(Date.UTC(y, mo - 1, d));
     }
     const dt = new Date(value);
@@ -32,30 +32,39 @@ export default function RequisitionList() {
   };
 
   useEffect(() => {
-    apiClient.get('/requisitions/')
-      .then(res => {
+    apiClient
+      .get('/requisitions/')
+      .then((res) => {
         const results = Array.isArray(res.data?.results)
           ? res.data.results
           : (Array.isArray(res.data) ? res.data : []);
-        const patched = results.map(r => ({
+
+        const patched = results.map((r) => ({
           ...r,
           fecha: r.fecha ? formatDMY(r.fecha) : r.fecha,
           created_at: r.created_at ? formatDMY(r.created_at) : r.created_at,
         }));
+
         setRequisitions(patched);
       })
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return <LoadingSpinner />;
-  }
+  if (loading) return <LoadingSpinner />;
 
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-      {requisitions.map(req => (
+      {requisitions.map((req) => (
         <div key={req.id} className="flex flex-col gap-2">
           <RequisitionCard requisition={req} />
+
+          {/* ✅ Leyenda más limpia (sin "en Modificar") */}
+          {!req.ack_cost_realistic && (
+            <div className="text-xs text-red-600">
+              Confirma “costo aproximado realista” para imprimir.
+            </div>
+          )}
+
           <div className="mt-1">
             <Link
               to={`/requisitions/edit/${req.id}`}

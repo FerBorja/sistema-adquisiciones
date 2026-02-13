@@ -56,6 +56,9 @@ export default function RequisitionWizard() {
   const [observaciones, setObservaciones] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // ✅ NUEVO: ACK costo aproximado realista (viene del Step 2)
+  const [ackCostRealistic, setAckCostRealistic] = useState(false);
+
   // --- Fetch Departments to resolve requesting_department ID ---
   const [departments, setDepartments] = useState([]);
   useEffect(() => {
@@ -105,6 +108,9 @@ export default function RequisitionWizard() {
     setItems([]);
     setRequisitionNumber('');
     setObservaciones('');
+
+    // ✅ NUEVO: reset del checkbox
+    setAckCostRealistic(false);
   };
 
   const handleNextFromStep1 = () => {
@@ -159,7 +165,6 @@ export default function RequisitionWizard() {
     }
 
     // ✅ Validación de estimated_total por renglón (obligatorio y > 0)
-    // También soporta que puedas traer estimated_unit_cost y calcular el total si quieres.
     const invalidLines = [];
     const normalizedItems = items.map((it, idx) => {
       const product = Number(it.product);
@@ -179,7 +184,7 @@ export default function RequisitionWizard() {
       }
 
       if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
-        invalidLines.push(idx + 1); // renglón humano (1-based)
+        invalidLines.push(idx + 1);
       }
 
       const payloadItem = {
@@ -187,11 +192,9 @@ export default function RequisitionWizard() {
         quantity,
         unit,
         description,
-        // ✅ NUEVO: obligatorio
         estimated_total: estimatedTotal,
       };
 
-      // opcional (si lo traes): guardar unitario también
       const unitCost = parseMoney(it.estimated_unit_cost);
       if (Number.isFinite(unitCost) && unitCost > 0) {
         payloadItem.estimated_unit_cost = Number(unitCost.toFixed(2));
@@ -221,6 +224,9 @@ export default function RequisitionWizard() {
       requisition_reason: strOrUndef(formData.description),
       observations: strOrUndef(observaciones),
       items: normalizedItems,
+
+      // ✅ NUEVO: enviar ack_cost_realistic en creación
+      ack_cost_realistic: !!ackCostRealistic,
     };
 
     const payload = compact(base);
@@ -304,6 +310,10 @@ export default function RequisitionWizard() {
             setItems={setItems}
             requisitionNumber={requisitionNumber}
             setRequisitionNumber={setRequisitionNumber}
+
+            // ✅ NUEVO: props para que el checkbox funcione en CREATE
+            ackCostRealistic={ackCostRealistic}
+            setAckCostRealistic={setAckCostRealistic}
           />
 
           {/* Observaciones textarea */}

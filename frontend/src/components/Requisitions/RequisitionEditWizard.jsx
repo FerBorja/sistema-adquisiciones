@@ -127,9 +127,12 @@ function SelectField({ label, value, onChange, options, getId, getLabel, placeho
 
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-lg w-full max-w-2xl p-4 md:p-6">
+      <div
+        className="relative bg-white rounded-xl shadow-lg w-full max-w-2xl p-4 md:p-6 z-[10000]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button
@@ -425,11 +428,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   };
 
   const openClassifier = () => {
+    console.log("[Wizard] openClassifier()");
     window.open("/docs/clasificador.pdf", "_blank", "noopener");
   };
 
   /* ──────────────── “Ver Catálogo” modal behaviors ──────────────────────── */
   const openCatalogModal = () => {
+    console.log("[Wizard] openCatalogModal()");
     setCatalogModalProduct(form.product || "");
     setCatalogModalDescs([]);
     setShowCatalogModal(true);
@@ -458,6 +463,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   /* ───────────────── “Registrar” (nuevo ItemDescription) ─────────────────── */
   const openRegisterModal = () => {
+    console.log("[Wizard] openRegisterModal()");
     setRegisterForm({ product: form.product || "", text: "" });
     setShowRegisterModal(true);
   };
@@ -512,15 +518,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     try {
       const cleanItems = items.map(({ _cid, ...rest }) => {
         const out = { ...rest };
-
-        // No mandes id si no existe (para que backend lo cree)
         if (!out.id) delete out.id;
-
-        // Si unit cost no está, mejor omitirlo
-        if (typeof out.estimated_unit_cost === "undefined") {
-          // ok
-        }
-
         return out;
       });
 
@@ -549,8 +547,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       alert(`Requisición #${requisition.id} guardada correctamente.`);
     } catch (err) {
       console.error(err);
-
-      // TIP: si quieres ver el error exacto del backend:
       const data = err?.response?.data;
       if (data) {
         alert(`No se pudo guardar.\n\n${JSON.stringify(data, null, 2)}`);
@@ -795,24 +791,41 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <div className="ml-auto flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={openClassifier}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log("CLICK: Clasificador (Wizard)");
+                        openClassifier();
+                      }}
                       className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
                     >
                       Clasificador
                     </button>
+
                     <button
                       type="button"
-                      onClick={openCatalogModal}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log("CLICK: Ver Catálogo (Wizard)");
+                        openCatalogModal();
+                      }}
                       className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
                     >
-                      Ver Catálogo
+                      Ver Catálogo (Wizard)
                     </button>
+
                     <button
                       type="button"
-                      onClick={openRegisterModal}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log("CLICK: Registrar (Wizard)");
+                        openRegisterModal();
+                      }}
                       className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
-                      Registrar
+                      Registrar (Wizard)
                     </button>
                   </div>
                 </div>
@@ -929,7 +942,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       {/* ───────────── Modals ───────────── */}
       {showCatalogModal && (
-        <Modal onClose={() => setShowCatalogModal(false)} title="Catálogo de Descripciones">
+        <Modal onClose={() => setShowCatalogModal(false)} title="Catálogo de Descripciones (Wizard)">
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Objeto del Gasto</label>
@@ -984,7 +997,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       )}
 
       {showRegisterModal && (
-        <Modal onClose={() => setShowRegisterModal(false)} title="Registrar Descripción">
+        <Modal onClose={() => setShowRegisterModal(false)} title="Registrar Descripción (Wizard)">
           <form onSubmit={submitRegister} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Objeto del Gasto</label>

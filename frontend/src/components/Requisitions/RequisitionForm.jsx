@@ -12,6 +12,7 @@ import { AuthContext } from '../../contexts/AuthContext';
  * - initialData: requisition object from GET /requisitions/:id/ (required for edit)
  * - embed: boolean (kept from your original)
  * - formData, setFormData: (optional) "controlled-if-provided" pattern
+ * - ackCostRealistic: (optional) boolean. If provided, will be sent as ack_cost_realistic.
  */
 export default function RequisitionForm({
   mode = 'create',
@@ -19,6 +20,7 @@ export default function RequisitionForm({
   embed = false,
   formData,
   setFormData,
+  ackCostRealistic, // optional
 }) {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -149,15 +151,13 @@ export default function RequisitionForm({
       ...prev,
       // UI textarea maps to backend requisition_reason
       description: initialData.requisition_reason ?? initialData.description ?? prev.description,
-      // If you later show observations in this step, you can prefill it as well:
-      // observations: initialData.observations ?? '',
-      fecha: prev.fecha, // creation date is server-side; keep UI date read-only
+      fecha: prev.fecha, // keep UI date read-only
       title: prev.title, // (not used by backend, kept for UI compatibility)
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, initialData]);
 
-  // Once catalogs are available (or updated), set IDs + labels from initialData
+  // Once catalogs are available, set IDs + labels from initialData
   useEffect(() => {
     if (mode !== 'edit' || !initialData) return;
 
@@ -202,7 +202,6 @@ export default function RequisitionForm({
     e.preventDefault();
     setLoading(true);
     try {
-      // ---- Build payload exactly as backend expects ----
       const basePayload = {
         project: data.project || null,
         funding_source: data.funding_source || null,
@@ -211,8 +210,8 @@ export default function RequisitionForm({
         tender: data.tender || null,
         category: data.category || null,
         external_service: data.external_service || null,
-        requisition_reason: data.description || '', // <-- map textarea to backend field
-        // observations: data.observations ?? undefined, // (optional) include if you add it to UI
+        requisition_reason: data.description || '',
+        ...(typeof ackCostRealistic === 'boolean' ? { ack_cost_realistic: ackCostRealistic } : {}),
       };
 
       if (mode === 'edit' && initialData?.id) {
@@ -230,9 +229,6 @@ export default function RequisitionForm({
         );
         showToast?.('Requisición actualizada correctamente!', 'success');
       } else {
-        // CREATE:
-        // If your backend auto-sets requesting_department from the user, we can omit it.
-        // If it requires an explicit ID, add a hidden field or fetch it before posting.
         await apiClient.post('/requisitions/', basePayload);
         showToast?.('Requisición creada correctamente!', 'success');
       }
@@ -246,10 +242,8 @@ export default function RequisitionForm({
     }
   };
 
-  // ----- shared content -----
   const content = (
     <>
-      {/* Department (read-only visual only) */}
       <label className="block mb-1 font-medium">Departamento</label>
       <input
         type="text"
@@ -261,7 +255,6 @@ export default function RequisitionForm({
         className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
       />
 
-      {/* Project */}
       <label className="block mb-1 font-medium">Proyecto</label>
       <select
         name="project"
@@ -279,7 +272,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Funding Source */}
       <label className="block mb-1 font-medium">Fuente de Financiamiento</label>
       <select
         name="funding_source"
@@ -297,7 +289,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Budget Unit */}
       <label className="block mb-1 font-medium">Unidad Presupuestal</label>
       <select
         name="budget_unit"
@@ -315,7 +306,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Agreements */}
       <label className="block mb-1 font-medium">Convenios</label>
       <select
         name="agreement"
@@ -333,7 +323,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Tender */}
       <label className="block mb-1 font-medium">Licitación</label>
       <select
         name="tender"
@@ -351,7 +340,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Category */}
       <label className="block mb-1 font-medium">Categoría</label>
       <select
         name="category"
@@ -369,7 +357,6 @@ export default function RequisitionForm({
         ))}
       </select>
 
-      {/* Fecha */}
       <label className="block mb-1 font-medium">Fecha</label>
       <input
         type="text"
@@ -381,7 +368,6 @@ export default function RequisitionForm({
         className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
       />
 
-      {/* Description */}
       <label className="block mb-1 font-medium">Motivos Requisición</label>
       <textarea
         name="description"
@@ -392,7 +378,6 @@ export default function RequisitionForm({
         className="border p-2 w-full rounded"
       />
 
-      {/* Solicitante */}
       <label className="block mb-1 font-medium">Solicitante</label>
       <input
         type="text"
@@ -404,7 +389,6 @@ export default function RequisitionForm({
         className="border p-2 w-full rounded bg-gray-100 cursor-not-allowed"
       />
 
-      {/* Servicio Externo / Académico */}
       <label className="block mb-1 font-medium">Servicio Externo / Académico</label>
       <select
         name="external_service"
