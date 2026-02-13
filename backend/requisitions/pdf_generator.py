@@ -2,6 +2,8 @@
 import os
 from io import BytesIO
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
+
 from django.conf import settings
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -9,7 +11,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 # ---------- helpers ----------
 _PLACEHOLDER_SUBSTRINGS = {
@@ -112,6 +114,24 @@ def _dedup_join(code, name, sep=' - '):
         return c
     return f"{c}{sep}{n}"
 
+# ---------- money helpers ----------
+def _d(v):
+    if v is None:
+        return None
+    if isinstance(v, Decimal):
+        return v
+    try:
+        return Decimal(str(v))
+    except Exception:
+        return None
+
+def money_mxn(v):
+    dv = _d(v)
+    if dv is None:
+        return ""
+    dv = dv.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"${dv:,.2f}"
+
 # Build best label for product / expense object with de-dup
 def _label_expense_object(product):
     if product is None:
@@ -177,6 +197,7 @@ def generate_requisition_pdf(requisition):
     bold = ParagraphStyle('bold', parent=normal, fontName='Helvetica-Bold')
     cell_left = ParagraphStyle('CellLeft', parent=small, wordWrap='CJK', alignment=TA_LEFT)
     cell_center = ParagraphStyle('CellCenter', parent=small, wordWrap='CJK', alignment=TA_CENTER)
+    cell_right = ParagraphStyle('CellRight', parent=small, wordWrap='CJK', alignment=TA_RIGHT)
     sig_title = ParagraphStyle('SigTitle', parent=base, fontName='Helvetica-Bold', fontSize=10, alignment=TA_CENTER)
     sig_name = ParagraphStyle('SigName', parent=base, fontName='Helvetica', fontSize=9, alignment=TA_CENTER)
 
@@ -295,7 +316,11 @@ def generate_requisition_pdf(requisition):
         Paragraph("Cantidad", ParagraphStyle('th2', parent=bold, alignment=TA_CENTER)),
         Paragraph("Unidad", ParagraphStyle('th3', parent=bold, alignment=TA_CENTER)),
         Paragraph("Descripción", ParagraphStyle('th4', parent=bold, alignment=TA_LEFT)),
+        Paragraph("Costo unitario (MXN)", ParagraphStyle('th5', parent=bold, alignment=TA_RIGHT)),
+        Paragraph("Total (MXN)", ParagraphStyle('th6', parent=bold, alignment=TA_RIGHT)),
     ]]
+
+    grand_total = Decimal("0.00")
 
     try:
         for item in requisition.items.all():
@@ -303,47 +328,100 @@ def generate_requisition_pdf(requisition):
             unit_label = _label_unit(_get(item, 'unit')) or '—'
             desc_label = _label_description(_get(item, 'description')) or '—'
 
-            qty = _get(item, 'quantity')
+            # quantity as Decimal (for calculations)
+            qty_raw = _get(item, 'quantity')
+            qty_dec = _d(qty_raw) or Decimal("0")
+
+            # pretty quantity string
             try:
-                if qty is None:
+                if qty_raw is None:
                     qty_str = '—'
-                elif float(qty).is_integer():
-                    qty_str = str(int(float(qty)))
+                elif float(qty_raw).is_integer():
+                    qty_str = str(int(float(qty_raw)))
                 else:
-                    qty_str = str(qty)
+                    qty_str = str(qty_raw)
             except Exception:
-                qty_str = _as_text(qty) or '—'
+                qty_str = _as_text(qty_raw) or '—'
+
+            est_unit = _d(_get(item, 'estimated_unit_cost'))
+            est_total = _d(_get(item, 'estimated_total'))
+
+            # Si no hay total pero sí hay unitario -> calcular total
+            if (est_total is None or est_total <= 0) and qty_dec > 0 and est_unit is not None and est_unit > 0:
+                est_total = (qty_dec * est_unit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            # Si no hay unitario, pero sí hay total -> calcular unitario
+            if (est_unit is None or est_unit <= 0) and qty_dec > 0 and est_total is not None and est_total > 0:
+                est_unit = (est_total / qty_dec).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            # defaults for display/sum
+            est_total_sum = est_total if est_total is not None else Decimal("0.00")
+            grand_total += est_total_sum
 
             items_data.append([
                 Paragraph(_escape(prod_label), cell_left),
                 Paragraph(_escape(qty_str), cell_center),
                 Paragraph(_escape(unit_label), cell_center),
                 Paragraph(_escape(desc_label), cell_left),
+                Paragraph(_escape(money_mxn(est_unit)), cell_right),
+                Paragraph(_escape(money_mxn(est_total)), cell_right),
             ])
     except Exception:
-        items_data.append(['—', '—', '—', '—'])
+        items_data.append(['—', '—', '—', '—', '—', '—'])
 
-    # Column widths
-    col0, col1, col2 = 150, 60, 80
-    col3 = max(140, doc.width - (col0 + col1 + col2))
+    # Fila TOTAL
+    items_data.append([
+        Paragraph("", cell_left),
+        Paragraph("", cell_center),
+        Paragraph("", cell_center),
+        Paragraph("TOTAL", ParagraphStyle('total_lbl', parent=bold, alignment=TA_RIGHT)),
+        Paragraph("", cell_right),
+        Paragraph(_escape(money_mxn(grand_total)), ParagraphStyle('total_val', parent=bold, alignment=TA_RIGHT)),
+    ])
 
-    items_table = Table(items_data, colWidths=[col0, col1, col2, col3], repeatRows=1)
+    # Column widths (must add up to doc.width)
+    # doc.width = page_w - left_margin - right_margin = 512 on letter with margins 50/50
+    col0 = 140  # Objeto del gasto
+    col1 = 45   # Cantidad
+    col2 = 55   # Unidad
+    col4 = 60   # Unitario
+    col5 = 60   # Total
+    col3 = max(120, doc.width - (col0 + col1 + col2 + col4 + col5))  # Descripción (flex)
+
+    items_table = Table(
+        items_data,
+        colWidths=[col0, col1, col2, col3, col4, col5],
+        repeatRows=1
+    )
     items_table.setStyle(TableStyle([
         ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+
         ('VALIGN', (0, 1), (-1, -1), 'TOP'),
-        ('ALIGN', (1, 1), (2, -1), 'CENTER'),
+
+        # alignment
+        ('ALIGN', (1, 1), (2, -2), 'CENTER'),   # Cantidad + Unidad (body rows)
+        ('ALIGN', (4, 1), (5, -1), 'RIGHT'),    # montos
         ('ALIGN', (0, 1), (0, -1), 'LEFT'),
         ('ALIGN', (3, 1), (3, -1), 'LEFT'),
+
         ('LEFTPADDING', (0, 0), (-1, -1), 4),
         ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
+
+        # TOTAL row style (last row)
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.whitesmoke),
     ]))
 
     story.append(items_table)
+    story.append(Spacer(1, 8))
+
+    # Total general (opcional bonito)
+    story.append(Paragraph(f"<b>Total requisición:</b> {money_mxn(grand_total)}", normal))
     story.append(Spacer(1, 12))
 
     # ---- Observaciones ----
