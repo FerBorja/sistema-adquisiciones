@@ -1,5 +1,5 @@
 // frontend/src/components/Requisitions/RequisitionEditWizard.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../../api/apiClient";
 import LoadingSpinner from "../UI/LoadingSpinner";
@@ -219,6 +219,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   // ✅ detectar cambios locales sin guardar
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // ✅ Camino 2 rollback: IDs creados en esta sesión (solo nuevos creados aquí)
+  const createdItemIdsThisSessionRef = useRef(new Set()); // Set<number>
+
   /* ───────────────────────── Step 1: editable header ─────────────────────── */
   const [headerForm, setHeaderForm] = useState({
     administrative_unit: "",
@@ -275,6 +278,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   const [busySave, setBusySave] = useState(false);
 
+  // ✅ NUEVO: busy para operaciones de items (POST/PATCH/DELETE)
+  const [busyItemOp, setBusyItemOp] = useState(false);
+
   /* ───────────────────────── Admin: monto real ───────────────────────────── */
   const [me, setMe] = useState(null);
   const [loadingMe, setLoadingMe] = useState(false);
@@ -316,12 +322,58 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     setRealAmountPendingDelta((prev) => prev + d);
   };
 
-  const handleCancelToList = () => {
+  // ✅ Cancelar + Camino 2 rollback
+  const handleCancelToList = async () => {
+    if (busyItemOp || busySave || busyRealAmount) {
+      alert("Hay una operación en curso. Espera a que termine antes de cancelar.");
+      return;
+    }
+
+    // confirmación por cambios locales
     if (hasUnsavedChanges) {
       if (!window.confirm("Hay cambios sin guardar. ¿Salir de todos modos?")) return;
     } else {
       if (!window.confirm("¿Salir sin guardar cambios?")) return;
     }
+
+    // Camino 2: si hubo items creados en esta sesión, ofrecer borrarlos
+    const createdIds = Array.from(createdItemIdsThisSessionRef.current || []);
+    if (createdIds.length > 0) {
+      const wantRollback = window.confirm(
+        `Detecté ${createdIds.length} partida(s) creada(s) en esta edición.\n\n¿Quieres eliminarlas antes de salir?`
+      );
+
+      if (wantRollback) {
+        setBusyItemOp(true);
+        try {
+          const results = await Promise.allSettled(
+            createdIds.map((id) => apiClient.delete(`/requisitions/${requisition.id}/items/${id}/`))
+          );
+
+          const failed = results
+            .map((r, i) => ({ r, id: createdIds[i] }))
+            .filter((x) => x.r.status === "rejected")
+            .map((x) => {
+              const err = x.r.reason;
+              const data = err?.response?.data;
+              const msg = data?.detail || (data ? JSON.stringify(data) : err?.message || "Error");
+              return `ID ${x.id}: ${msg}`;
+            });
+
+          if (failed.length > 0) {
+            alert(
+              "Se intentó hacer rollback, pero algunas partidas no se pudieron eliminar:\n\n" + failed.join("\n")
+            );
+          }
+        } catch (err) {
+          console.error(err);
+          alert("No se pudo hacer rollback de las partidas creadas. Revisa la consola.");
+        } finally {
+          setBusyItemOp(false);
+        }
+      }
+    }
+
     navigate(LIST_ROUTE);
   };
 
@@ -345,6 +397,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   // Cargar requisición en UI
   useEffect(() => {
     if (!requisition) return;
+
+    // ✅ reset de rollback por sesión al cambiar requisición
+    createdItemIdsThisSessionRef.current = new Set();
 
     const createdISO = requisition.created_at ? new Date(requisition.created_at) : null;
     const yyyyMMdd = createdISO
@@ -591,10 +646,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.description, descOptions]);
 
-  const addOrUpdateItem = (e) => {
+  // ✅ B) addOrUpdateItem → POST/PATCH a items anidados
+  const addOrUpdateItem = async (e) => {
     e.preventDefault();
 
-    const { _cid, id, product, quantity, unit, description, estimated_unit_cost } = form;
+    const { id, product, quantity, unit, description, estimated_unit_cost } = form;
 
     if (!product || !description || !quantity || !unit) {
       alert("Completa Objeto del Gasto, Descripción, Cantidad y Unidad.");
@@ -615,55 +671,97 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const totalNum = Number((qty * unitCostNum).toFixed(2));
 
-    const selected = (descOptions || []).find((d) => String(d.id) === String(description));
-    const descTextLocal = selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
-    const descDisplayLocal = descTextLocal ? `${descTextLocal} (ID: ${Number(description)})` : `ID: ${Number(description)}`;
-
-    const normalized = {
-      _cid: _cid || `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      id: id ?? undefined, // 👈 NO es id temporal, es "undefined" si es nuevo
+    // payload limpio
+    const payload = {
       product: Number(product),
       quantity: qty,
       unit: Number(unit),
       description: Number(description),
-      description_text: descTextLocal,
-      description_display: descDisplayLocal,
       estimated_unit_cost: Number(unitCostNum.toFixed(2)),
       estimated_total: totalNum,
     };
 
-    const isNewRow = !_cid;
+    // UI local
+    const selected = (descOptions || []).find((d) => String(d.id) === String(description));
+    const descTextLocal = selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
+    const descDisplayLocal = descTextLocal ? `${descTextLocal} (ID: ${Number(description)})` : `ID: ${Number(description)}`;
 
-    if (adminLike) {
-      if (isNewRow) {
-        markRealAmountPending(totalNum);
+    setBusyItemOp(true);
+    try {
+      if (isRealId(id)) {
+        // ✅ PATCH existente
+        const res = await apiClient.patch(`/requisitions/${requisition.id}/items/${Number(id)}/`, payload);
+        const updated = res.data;
+
+        // delta real amount (solo admin)
+        if (adminLike) {
+          const oldRow = (items || []).find((r) => Number(r.id) === Number(id));
+          const oldTotal = Number(oldRow?.estimated_total);
+          const oldTotalSafe = Number.isFinite(oldTotal) ? oldTotal : 0;
+          const delta = Number((totalNum - oldTotalSafe).toFixed(2));
+          if (delta !== 0) markRealAmountPending(delta);
+        }
+
+        setItems((prev) =>
+          prev.map((row) =>
+            Number(row.id) === Number(updated.id)
+              ? {
+                  ...row,
+                  _cid: String(updated.id),
+                  id: updated.id,
+                  ...payload,
+                  description_text: updated.description_text || descTextLocal,
+                  description_display: updated.description_display || descDisplayLocal,
+                }
+              : row
+          )
+        );
       } else {
-        const oldRow = (items || []).find((r) => String(r._cid) === String(_cid));
-        const oldTotal = Number(oldRow?.estimated_total);
-        const oldTotalSafe = Number.isFinite(oldTotal) ? oldTotal : 0;
-        const delta = Number((totalNum - oldTotalSafe).toFixed(2));
-        if (delta !== 0) markRealAmountPending(delta);
+        // ✅ POST nuevo: regresa ID
+        const res = await apiClient.post(`/requisitions/${requisition.id}/items/`, payload);
+        const created = res.data;
+
+        // registrar ID para rollback sesión
+        if (isRealId(created?.id)) {
+          createdItemIdsThisSessionRef.current.add(Number(created.id));
+        }
+
+        if (adminLike) {
+          markRealAmountPending(totalNum);
+        }
+
+        setItems((prev) => [
+          ...prev,
+          {
+            _cid: String(created.id),
+            id: created.id,
+            ...payload,
+            description_text: created.description_text || descTextLocal,
+            description_display: created.description_display || descDisplayLocal,
+          },
+        ]);
       }
+
+      setHasUnsavedChanges(true);
+
+      // limpia form
+      setForm({
+        _cid: null,
+        id: null,
+        product: "",
+        quantity: "",
+        unit: "",
+        description: "",
+        estimated_unit_cost: "",
+        estimated_total: "",
+      });
+    } catch (err) {
+      console.error(err);
+      const data = err?.response?.data;
+      alert(`No se pudo guardar la partida.\n\n${data ? JSON.stringify(data, null, 2) : err?.message || ""}`);
+    } finally {
+      setBusyItemOp(false);
     }
-
-    if (_cid) {
-      setItems((prev) => prev.map((row) => (row._cid === _cid ? normalized : row)));
-    } else {
-      setItems((prev) => [...prev, normalized]);
-    }
-
-    setHasUnsavedChanges(true);
-
-    setForm({
-      _cid: null,
-      id: null,
-      product: "",
-      quantity: "",
-      unit: "",
-      description: "",
-      estimated_unit_cost: "",
-      estimated_total: "",
-    });
   };
 
   const editRow = (row) => {
@@ -683,30 +781,49 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     if (step !== 2) setStep(2);
   };
 
-  const deleteRow = (_cid) => {
+  // ✅ C) deleteRow → DELETE real si tiene id
+  const deleteRow = async (_cid) => {
     if (!window.confirm("¿Eliminar este artículo?")) return;
 
-    if (adminLike) {
-      const row = (items || []).find((r) => String(r._cid) === String(_cid));
-      const oldTotal = Number(row?.estimated_total);
-      const oldTotalSafe = Number.isFinite(oldTotal) ? oldTotal : 0;
-      if (oldTotalSafe !== 0) markRealAmountPending(-oldTotalSafe);
-    }
+    const row = (items || []).find((r) => String(r._cid) === String(_cid));
+    const realId = row?.id;
 
-    setItems((prev) => prev.filter((r) => r._cid !== _cid));
-    setHasUnsavedChanges(true);
+    setBusyItemOp(true);
+    try {
+      if (isRealId(realId)) {
+        await apiClient.delete(`/requisitions/${requisition.id}/items/${Number(realId)}/`);
+        // si era creado en sesión, quítalo del set
+        createdItemIdsThisSessionRef.current.delete(Number(realId));
+      }
 
-    if (String(form._cid) === String(_cid)) {
-      setForm({
-        _cid: null,
-        id: null,
-        product: "",
-        quantity: "",
-        unit: "",
-        description: "",
-        estimated_unit_cost: "",
-        estimated_total: "",
-      });
+      // delta real amount (solo admin)
+      if (adminLike) {
+        const oldTotal = Number(row?.estimated_total);
+        const oldTotalSafe = Number.isFinite(oldTotal) ? oldTotal : 0;
+        if (oldTotalSafe !== 0) markRealAmountPending(-oldTotalSafe);
+      }
+
+      setItems((prev) => prev.filter((r) => r._cid !== _cid));
+      setHasUnsavedChanges(true);
+
+      if (String(form._cid) === String(_cid)) {
+        setForm({
+          _cid: null,
+          id: null,
+          product: "",
+          quantity: "",
+          unit: "",
+          description: "",
+          estimated_unit_cost: "",
+          estimated_total: "",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      const data = err?.response?.data;
+      alert(`No se pudo eliminar.\n\n${data ? JSON.stringify(data, null, 2) : err?.message || ""}`);
+    } finally {
+      setBusyItemOp(false);
     }
   };
 
@@ -829,13 +946,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       throw new Error("Blocked: real amount required");
     }
 
-    // ✅ Limpieza robusta: NO mandar ids que no sean int>0
-    const cleanItems = (items || []).map(({ _cid, description_text, description_display, ...rest }) => {
-      const out = { ...rest };
-      if (!isRealId(out.id)) delete out.id;
-      return out;
-    });
-
     const payload = {
       requesting_department: numOrNull(headerForm.requesting_department),
       project: numOrNull(headerForm.project),
@@ -851,16 +961,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       ack_cost_realistic: ackCostRealistic,
 
-      items: cleanItems,
       status: headerForm.status,
     };
 
     const resp = await apiClient.put(`/requisitions/${requisition.id}/`, payload);
 
-    // ✅ REHIDRATACIÓN: aquí está el fix del “pendiente de recargar”
+    // ✅ REHIDRATACIÓN
     const updated = resp.data;
 
-    // sincroniza header/obs/ack/items inmediatamente (sin reload)
     try {
       setHeaderForm((prev) => ({
         ...prev,
@@ -878,26 +986,31 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       setObservations(updated.observations || "");
       setAckCostRealistic(Boolean(updated.ack_cost_realistic));
 
-      setItems(
-        (updated.items || []).map((it) => ({
-          _cid: String(it.id),
-          id: it.id,
-          product: coerceId(it.product),
-          quantity: Number(it.quantity ?? 0),
-          unit: coerceId(it.unit),
-          description: coerceId(it.description),
-          description_text: it.description_text || "",
-          description_display: it.description_display || "",
-          estimated_unit_cost:
-            it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
-          estimated_total:
-            it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
-        }))
-      );
+      // si el backend regresa items aquí, rehidrata (si no, no pasa nada)
+      if (Array.isArray(updated.items)) {
+        setItems(
+          (updated.items || []).map((it) => ({
+            _cid: String(it.id),
+            id: it.id,
+            product: coerceId(it.product),
+            quantity: Number(it.quantity ?? 0),
+            unit: coerceId(it.unit),
+            description: coerceId(it.description),
+            description_text: it.description_text || "",
+            description_display: it.description_display || "",
+            estimated_unit_cost:
+              it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
+                ? ""
+                : Number(it.estimated_unit_cost),
+            estimated_total:
+              it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
+          }))
+        );
+      }
 
       setRealAmountLogs(Array.isArray(updated.real_amount_logs) ? updated.real_amount_logs : []);
     } catch {
-      // si algo cambia en el shape, no rompas guardado
+      // no rompas guardado
     }
 
     onSaved?.(updated);
@@ -1115,7 +1228,12 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
           )}
 
           <div className="mt-6 flex items-center justify-between">
-            <button type="button" onClick={handleCancelToList} className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300">
+            <button
+              type="button"
+              onClick={handleCancelToList}
+              disabled={busyItemOp || busySave || busyRealAmount}
+              className={`px-4 py-2 rounded ${busyItemOp || busySave || busyRealAmount ? "bg-slate-100" : "bg-slate-200 hover:bg-slate-300"}`}
+            >
               Cancelar
             </button>
 
@@ -1264,8 +1382,12 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
                 {/* Action row */}
                 <div className="md:col-span-12 flex items-end gap-2">
-                  <button type="submit" className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700">
-                    {form._cid ? "Guardar cambios" : "Agregar"}
+                  <button
+                    type="submit"
+                    disabled={busyItemOp}
+                    className={`px-3 py-2 rounded text-white ${busyItemOp ? "bg-green-300" : "bg-green-600 hover:bg-green-700"}`}
+                  >
+                    {busyItemOp ? "Guardando..." : form._cid ? "Guardar cambios" : "Agregar"}
                   </button>
 
                   {form._cid && (
@@ -1284,6 +1406,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                           estimated_total: "",
                         })
                       }
+                      disabled={busyItemOp}
                     >
                       Cancelar
                     </button>
@@ -1372,15 +1495,17 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                                 <div className="flex justify-center gap-2">
                                   <button
                                     type="button"
-                                    className="px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700"
+                                    className={`px-2 py-1 rounded text-white ${busyItemOp ? "bg-blue-300" : "bg-blue-600 hover:bg-blue-700"}`}
                                     onClick={() => editRow(row)}
+                                    disabled={busyItemOp}
                                   >
                                     Editar
                                   </button>
                                   <button
                                     type="button"
-                                    className="px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700"
+                                    className={`px-2 py-1 rounded text-white ${busyItemOp ? "bg-red-300" : "bg-red-600 hover:bg-red-700"}`}
                                     onClick={() => deleteRow(row._cid)}
+                                    disabled={busyItemOp}
                                   >
                                     Eliminar
                                   </button>
@@ -1558,7 +1683,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <button type="button" onClick={goPrev} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">
                     Anterior
                   </button>
-                  <button type="button" onClick={handleCancelToList} className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300">
+                  <button
+                    type="button"
+                    onClick={handleCancelToList}
+                    disabled={busyItemOp || busySave || busyRealAmount}
+                    className={`px-4 py-2 rounded ${
+                      busyItemOp || busySave || busyRealAmount ? "bg-slate-100" : "bg-slate-200 hover:bg-slate-300"
+                    }`}
+                  >
                     Cancelar
                   </button>
                 </div>

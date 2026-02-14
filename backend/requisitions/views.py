@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from django.http import HttpResponse
 
 from django.db.models import Count  # ✅ contar items
+from django.shortcuts import get_object_or_404  # ✅ NUEVO
 
 from .models import (
     Requisition, RequisitionItem, RequisitionRealAmountLog,
@@ -214,6 +215,81 @@ class RequisitionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    # =========================================================================
+    # ✅ NUEVO: Items anidados (GET/POST/PATCH/DELETE)
+    #   POST   /api/requisitions/{id}/items/               -> crea 1 item y regresa el item con id
+    #   GET    /api/requisitions/{id}/items/               -> lista items de la requisición
+    #   PATCH  /api/requisitions/{id}/items/{item_id}/     -> edita 1 item
+    #   DELETE /api/requisitions/{id}/items/{item_id}/     -> borra 1 item
+    # =========================================================================
+
+    @action(
+        detail=True,
+        methods=["get", "post"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path="items"
+    )
+    def items_nested(self, request, pk=None):
+        requisition = self.get_object()
+
+        if requisition.status == "cancelled":
+            return Response(
+                {"detail": "No se puede modificar una requisición cancelada."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if request.method == "GET":
+            qs = requisition.items.order_by("id")
+            ser = RequisitionItemSerializer(qs, many=True)
+            return Response(ser.data, status=status.HTTP_200_OK)
+
+        # POST: crear 1 item
+        ser = RequisitionItemSerializer(data=request.data, context={"request": request})
+        ser.is_valid(raise_exception=True)
+
+        # Fuerza requisition del parent (evita colisiones)
+        item = ser.save(requisition=requisition)
+
+        out = RequisitionItemSerializer(item).data
+        return Response(out, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["patch", "delete"],
+        permission_classes=[permissions.IsAuthenticated],
+        url_path=r"items/(?P<item_id>\d+)"
+    )
+    def item_nested(self, request, pk=None, item_id=None):
+        requisition = self.get_object()
+
+        if requisition.status == "cancelled":
+            return Response(
+                {"detail": "No se puede modificar una requisición cancelada."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        item = get_object_or_404(requisition.items, id=item_id)
+
+        if request.method == "DELETE":
+            # No permitir borrar si ya está cotizado
+            if RequisitionQuoteItem.objects.filter(requisition_item=item).exists():
+                return Response(
+                    {"detail": "No puedes eliminar una partida que ya tiene cotización. Elimina la cotización primero."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            item.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PATCH
+        ser = RequisitionItemSerializer(item, data=request.data, partial=True, context={"request": request})
+        ser.is_valid(raise_exception=True)
+        ser.save(requisition=requisition)
+
+        return Response(ser.data, status=status.HTTP_200_OK)
+
+    # =========================================================================
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def export_pdf(self, request, pk=None):

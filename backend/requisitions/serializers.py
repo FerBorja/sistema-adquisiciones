@@ -29,7 +29,10 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
     # ✅ Permitimos id en payload para UPDATE de nested items
     id = serializers.IntegerField(required=False)
 
-    # ✅ NUEVO: texto de descripción y display bonito
+    # ✅ IMPORTANTE: el parent fija requisition, no el cliente
+    requisition = serializers.PrimaryKeyRelatedField(read_only=True)
+
+    # ✅ texto de descripción y display bonito
     description_text = serializers.CharField(source="description.text", read_only=True)
     description_display = serializers.SerializerMethodField(read_only=True)
 
@@ -189,7 +192,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # ✅ HARDENING: No permitir CREATE (POST) sin items
-        # Esto bloquea requisiciones vacías aunque el frontend se equivoque.
         if self.instance is None:
             items = attrs.get("items", None)
             if not items or len(items) == 0:
@@ -216,7 +218,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop("items", None)
         user = self._require_user()
 
-        # ✅ HARDENING extra: por si alguien salta validate por alguna razón rara
         if not items_data or len(items_data) == 0:
             raise ValidationError({"items": "Debes registrar al menos una partida."})
 
@@ -243,6 +244,8 @@ class RequisitionSerializer(serializers.ModelSerializer):
                     setattr(instance, attr, value)
                 instance.save()
 
+                # 👇 OJO: con Opción B, idealmente ya NO mandas items en PUT.
+                # Si items_data llega, este bloque seguirá sincronizando (y puede borrar si faltan).
                 if items_data is not None:
                     existing = {it.id: it for it in instance.items.all()}
                     sent_ids = []
@@ -269,10 +272,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
             raise ValidationError({"detail": str(e)})
 
 
-# =============================================================================
-# ✅ NUEVO: Serializer de cotizaciones
-# =============================================================================
-
 class RequisitionQuoteSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
     item_ids = serializers.ListField(
@@ -292,8 +291,8 @@ class RequisitionQuoteSerializer(serializers.ModelSerializer):
             "size_bytes",
             "uploaded_by",
             "uploaded_at",
-            "item_ids",   # write-only
-            "items",      # read-only
+            "item_ids",
+            "items",
         ]
         read_only_fields = ["id", "uploaded_by", "uploaded_at", "file_url", "size_bytes", "original_name"]
 
@@ -320,7 +319,6 @@ class RequisitionQuoteSerializer(serializers.ModelSerializer):
         if items.count() != len(set(item_ids)):
             raise serializers.ValidationError({"item_ids": "Algunos items no pertenecen a esta requisición."})
 
-        # ✅ No más de una cotización por item
         already = RequisitionQuoteItem.objects.filter(
             requisition_item__in=items
         ).values_list("requisition_item_id", flat=True)
