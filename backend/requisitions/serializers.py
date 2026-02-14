@@ -8,7 +8,10 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError as Django
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from .models import Requisition, RequisitionItem, RequisitionRealAmountLog
+from .models import (
+    Requisition, RequisitionItem, RequisitionRealAmountLog,
+    RequisitionQuote, RequisitionQuoteItem,
+)
 
 
 def _money2(value: Decimal) -> Decimal:
@@ -33,7 +36,6 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = RequisitionItem
         fields = "__all__"
-        # OJO: NO pongas 'id' aquí
         read_only_fields = ["requisition", "description_text", "description_display"]
 
     def get_description_display(self, obj):
@@ -116,7 +118,7 @@ class RequisitionRealAmountLogSerializer(serializers.ModelSerializer):
 class RequisitionSerializer(serializers.ModelSerializer):
     items = RequisitionItemSerializer(many=True, required=False)
 
-    # ✅ Solo lectura aquí: para mantener auditoría obligatoria (solo se cambia via endpoint set_real_amount)
+    # ✅ Solo lectura aquí: para mantener auditoría obligatoria
     real_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     # ✅ Historial (solo lectura)
@@ -145,11 +147,9 @@ class RequisitionSerializer(serializers.ModelSerializer):
         incoming = incoming or {}
         target_status = incoming.get("status", None)
 
-        # Solo aplica si intentan poner sent
         if target_status != "sent":
             return
 
-        # ack_cost_realistic: si viene en payload úsalo; si no, toma del instance
         if "ack_cost_realistic" in incoming:
             ack = bool(incoming.get("ack_cost_realistic"))
         else:
@@ -160,7 +160,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
                 "ack_cost_realistic": "Debes confirmar 'costo aproximado pero realista' para poder ENVIAR."
             })
 
-        # Determinar items: si vienen en payload usa esos; si no, toma los existentes
         if items_data is not None:
             items = items_data
         else:
@@ -169,7 +168,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
         if not items or len(items) == 0:
             raise ValidationError({"items": "No se puede ENVIAR una requisición sin renglones (items)."})
 
-        # Validar estimated_total por renglón
         bad_idx = []
         for idx, it in enumerate(items, start=1):
             est_total = it.get("estimated_total") if isinstance(it, dict) else getattr(it, "estimated_total", None)
@@ -190,7 +188,14 @@ class RequisitionSerializer(serializers.ModelSerializer):
             })
 
     def validate(self, attrs):
-        # ✅ Bloqueo duro: real_amount NO se edita por este serializer (ni admin), para no saltarse auditoría
+        # ✅ HARDENING: No permitir CREATE (POST) sin items
+        # Esto bloquea requisiciones vacías aunque el frontend se equivoque.
+        if self.instance is None:
+            items = attrs.get("items", None)
+            if not items or len(items) == 0:
+                raise ValidationError({"items": "Debes registrar al menos una partida."})
+
+        # ✅ Bloqueo duro: real_amount NO se edita por este serializer
         req = self.context.get("request")
         data = getattr(req, "data", {}) if req is not None else {}
         if isinstance(data, dict) and "real_amount" in data:
@@ -201,18 +206,20 @@ class RequisitionSerializer(serializers.ModelSerializer):
                 )
             })
 
-        # Candado de envío por status
         instance = getattr(self, "instance", None)
-        items_data = attrs.get("items", None)  # puede venir o no
+        items_data = attrs.get("items", None)
         self._assert_ready_to_send(instance=instance, incoming=attrs, items_data=items_data)
         return attrs
 
     def create(self, validated_data):
         validated_data.pop("user", None)
-        items_data = validated_data.pop("items", [])
+        items_data = validated_data.pop("items", None)
         user = self._require_user()
 
-        # Candado de envío si en create ya intentan status='sent'
+        # ✅ HARDENING extra: por si alguien salta validate por alguna razón rara
+        if not items_data or len(items_data) == 0:
+            raise ValidationError({"items": "Debes registrar al menos una partida."})
+
         self._assert_ready_to_send(instance=None, incoming=validated_data, items_data=items_data)
 
         try:
@@ -228,7 +235,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
         validated_data.pop("user", None)
         items_data = validated_data.pop("items", None)
 
-        # Candado de envío si en update intentan status='sent'
         self._assert_ready_to_send(instance=instance, incoming=validated_data, items_data=items_data)
 
         try:
@@ -254,7 +260,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
                         else:
                             RequisitionItem.objects.create(requisition=instance, **row)
 
-                    # borra los que no vinieron
                     for iid, it in existing.items():
                         if iid not in sent_ids:
                             it.delete()
@@ -262,3 +267,79 @@ class RequisitionSerializer(serializers.ModelSerializer):
                 return instance
         except (IntegrityError, DjangoValidationError, ObjectDoesNotExist, TypeError, KeyError) as e:
             raise ValidationError({"detail": str(e)})
+
+
+# =============================================================================
+# ✅ NUEVO: Serializer de cotizaciones
+# =============================================================================
+
+class RequisitionQuoteSerializer(serializers.ModelSerializer):
+    file_url = serializers.SerializerMethodField()
+    item_ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=True
+    )
+    items = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = RequisitionQuote
+        fields = [
+            "id",
+            "requisition",
+            "file_url",
+            "original_name",
+            "size_bytes",
+            "uploaded_by",
+            "uploaded_at",
+            "item_ids",   # write-only
+            "items",      # read-only
+        ]
+        read_only_fields = ["id", "uploaded_by", "uploaded_at", "file_url", "size_bytes", "original_name"]
+
+    def get_file_url(self, obj):
+        try:
+            return obj.file.url if obj.file else None
+        except Exception:
+            return None
+
+    def get_items(self, obj):
+        qs = obj.items.all().values("id", "product_id", "description_id", "quantity", "estimated_total")
+        return list(qs)
+
+    def validate_item_ids(self, value):
+        if not value or len(value) == 0:
+            raise serializers.ValidationError("Debes seleccionar al menos una partida.")
+        return value
+
+    def create(self, validated_data):
+        item_ids = validated_data.pop("item_ids", [])
+        req = validated_data.get("requisition")
+
+        items = RequisitionItem.objects.filter(id__in=item_ids, requisition=req)
+        if items.count() != len(set(item_ids)):
+            raise serializers.ValidationError({"item_ids": "Algunos items no pertenecen a esta requisición."})
+
+        # ✅ No más de una cotización por item
+        already = RequisitionQuoteItem.objects.filter(
+            requisition_item__in=items
+        ).values_list("requisition_item_id", flat=True)
+        already = list(already)
+        if already:
+            raise serializers.ValidationError({"item_ids": f"Estos items ya tienen cotización. Item IDs: {already}"})
+
+        request = self.context.get("request")
+        if request and getattr(request, "user", None):
+            validated_data.setdefault("uploaded_by", request.user)
+
+        quote = RequisitionQuote.objects.create(**validated_data)
+
+        if quote.file:
+            quote.original_name = getattr(quote.file, "name", "") or quote.original_name
+            quote.size_bytes = getattr(quote.file, "size", 0) or 0
+            quote.save(update_fields=["original_name", "size_bytes"])
+
+        for it in items:
+            RequisitionQuoteItem.objects.create(quote=quote, requisition_item=it)
+
+        return quote

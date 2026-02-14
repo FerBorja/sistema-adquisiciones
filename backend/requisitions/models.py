@@ -1,7 +1,10 @@
 from decimal import Decimal
+import os
+import uuid
 
 from django.conf import settings
-from django.core.validators import MinValueValidator
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, FileExtensionValidator
 from django.db import models
 from django.db.models.functions import Lower
 
@@ -263,3 +266,86 @@ class RequisitionItem(models.Model):
 
     def __str__(self):
         return f"{self.product.description} ({self.quantity} {self.unit.name}) - {self.description.text}"
+
+
+# =============================================================================
+# ✅ NUEVO: Cotizaciones
+# =============================================================================
+
+MAX_QUOTE_SIZE_BYTES = 50 * 1024 * 1024  # 50MB
+
+
+def quote_upload_to(instance, filename):
+    # Evita colisiones de nombre (uuid) y conserva extensión
+    _, ext = os.path.splitext(filename or "")
+    ext = (ext or ".pdf").lower()
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    return f"requisitions/{instance.requisition_id}/quotes/{safe_name}"
+
+
+def validate_file_size(file_obj):
+    if file_obj.size > MAX_QUOTE_SIZE_BYTES:
+        raise ValidationError("El archivo excede 50 MB.")
+
+
+class RequisitionQuote(models.Model):
+    requisition = models.ForeignKey(
+        Requisition,
+        related_name="quotes",
+        on_delete=models.CASCADE
+    )
+
+    file = models.FileField(
+        upload_to=quote_upload_to,
+        validators=[
+            FileExtensionValidator(allowed_extensions=["pdf"]),
+            validate_file_size,
+        ],
+    )
+
+    original_name = models.CharField(max_length=255, blank=True, default="")
+    size_bytes = models.BigIntegerField(default=0)
+
+    uploaded_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="uploaded_requisition_quotes",
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    # Una cotización puede cubrir varias partidas
+    items = models.ManyToManyField(
+        RequisitionItem,
+        through="RequisitionQuoteItem",
+        related_name="quote_links"
+    )
+
+    def __str__(self):
+        return f"Quote #{self.id} (Req {self.requisition_id})"
+
+
+class RequisitionQuoteItem(models.Model):
+    quote = models.ForeignKey(
+        RequisitionQuote,
+        related_name="quote_items",
+        on_delete=models.CASCADE
+    )
+    requisition_item = models.ForeignKey(
+        RequisitionItem,
+        related_name="item_quote_links",
+        on_delete=models.CASCADE
+    )
+
+    class Meta:
+        # ✅ No puede haber más de una cotización por partida
+        constraints = [
+            models.UniqueConstraint(
+                fields=["requisition_item"],
+                name="uniq_quote_per_requisition_item"
+            )
+        ]
+
+    def __str__(self):
+        return f"QuoteItem quote={self.quote_id} item={self.requisition_item_id}"

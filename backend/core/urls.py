@@ -8,7 +8,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 urlpatterns = [
     path('admin/', admin.site.urls),
 
-    # ✅ JWT primero (ANTES del include('api/'))
+    # ✅ JWT primero
     path('api/token/', EmployeeNumberTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
@@ -17,11 +17,12 @@ urlpatterns = [
     path('api/catalogs/', include('catalogs.urls')),
     path('api/reports/', include('reports.urls')),
 
-    # ✅ Alias: /api/item-descriptions/ (compatibilidad opcional)
+    # ✅ Alias
     path('api/', include('catalogs.urls_item_descriptions_alias')),
 
-    # ✅ Este al final (para no “tragarse” /api/token/)
+    # ✅ Requisitions al final
     path('api/', include('requisitions.urls')),
 ]
 
-urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

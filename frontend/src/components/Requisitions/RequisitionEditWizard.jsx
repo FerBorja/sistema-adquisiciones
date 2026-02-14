@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../../api/apiClient";
 import LoadingSpinner from "../UI/LoadingSpinner";
+import RequisitionQuotesPanel from "./RequisitionQuotesPanel";
 
 /* ✅ Ruta a la lista (ajústala si tu app usa otra) */
 const LIST_ROUTE = "/requisitions";
@@ -127,19 +128,12 @@ function getDescTextFromCache(descCache, productId, descId) {
 
 /** ✅ Prefer backend bonito si existe; si no, usa cache/fallback */
 function getNiceDescDisplay({ row, descCache }) {
-  // 1) Backend: ya viene listo
   if (row?.description_display) return row.description_display;
+  if (row?.description_text) return `${row.description_text} (ID: ${row.description})`;
 
-  // 2) Backend: viene texto
-  if (row?.description_text) {
-    return `${row.description_text} (ID: ${row.description})`;
-  }
-
-  // 3) Front cache
   const txt = getDescTextFromCache(descCache, row?.product, row?.description);
   if (txt) return `${txt} (ID: ${row.description})`;
 
-  // 4) Último recurso
   return row?.description ? `ID: ${row.description}` : "";
 }
 
@@ -164,7 +158,6 @@ function SelectField({ label, value, onChange, options, getId, getLabel, placeho
 }
 
 function Modal({ title, onClose, children }) {
-  // ESC para cerrar
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === "Escape") onClose?.();
@@ -201,7 +194,7 @@ async function fetchMeFirstOk() {
       const resp = await apiClient.get(u);
       if (resp?.data) return resp.data;
     } catch {
-      // silencio; probamos el siguiente
+      // silencio
     }
   }
   return null;
@@ -213,9 +206,14 @@ function isAdminLike(me) {
   return Boolean(me.is_superuser || me.is_staff || role === "admin" || role === "superuser");
 }
 
+/** ✅ helper: id real para backend */
+function isRealId(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && Number.isInteger(n) && n > 0;
+}
+
 export default function RequisitionEditWizard({ requisition, onSaved }) {
   const navigate = useNavigate();
-
   const [step, setStep] = useState(1);
 
   // ✅ detectar cambios locales sin guardar
@@ -252,7 +250,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [descOptions, setDescOptions] = useState([]);
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
 
-  // ✅ cache de descripciones por producto (para mostrar texto en tabla)
+  // ✅ cache de descripciones por producto
   const [descCache, setDescCache] = useState({}); // { [productId]: [{id,text,estimated_unit_cost,...}] }
 
   const [form, setForm] = useState({
@@ -266,13 +264,12 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     estimated_total: "",
   });
 
-  // Modals for “Ver Catálogo” & “Registrar”
+  // Modals
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [catalogModalProduct, setCatalogModalProduct] = useState("");
   const [catalogModalDescs, setCatalogModalDescs] = useState([]);
 
-  // ✅ incluye costo (obligatorio)
   const [registerForm, setRegisterForm] = useState({ product: "", text: "", estimated_unit_cost: "" });
   const [busyRegister, setBusyRegister] = useState(false);
 
@@ -283,6 +280,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [loadingMe, setLoadingMe] = useState(false);
 
   const adminLike = useMemo(() => isAdminLike(me), [me]);
+
+  // ✅ mantener TU comportamiento: bloquear monto real si hay draft PDF incompleto
+  const [quoteDraftInvalid, setQuoteDraftInvalid] = useState(false);
+  const disableRealAmountByQuoteDraft = quoteDraftInvalid;
 
   // ✅ estados para obligar captura de monto real tras cambios en items / inicial sin real_amount
   const [realAmountNeedsUpdate, setRealAmountNeedsUpdate] = useState(false);
@@ -298,10 +299,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   // ✅ Guardar requisición bloqueado si admin tiene pendiente captura
   const disableSave = adminLike && realAmountNeedsUpdate && !realAmountCaptured;
 
-  // ✅ NUEVO: Guardar bloqueado si no confirmó costo aproximado realista
+  // ✅ Guardar bloqueado si no confirmó costo aproximado realista
   const disableSaveByAck = !ackCostRealistic;
 
-  // ✅ NUEVO: Monto real bloqueado si no confirmó costo aproximado realista
+  // ✅ Monto real bloqueado si no confirmó costo aproximado realista
   const disableRealAmountByAck = !ackCostRealistic;
 
   const markRealAmountPending = (delta) => {
@@ -382,34 +383,24 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         description_text: it.description_text || "",
         description_display: it.description_display || "",
         estimated_unit_cost:
-          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
-            ? ""
-            : Number(it.estimated_unit_cost),
+          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
         estimated_total:
-          it.estimated_total === null || typeof it.estimated_total === "undefined"
-            ? ""
-            : Number(it.estimated_total),
+          it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
       }))
     );
 
     setObservations(requisition.observations || "");
 
-    // ✅ Detectar si hay monto real ya capturado
     const hasReal = requisition.real_amount !== null && typeof requisition.real_amount !== "undefined";
-
-    // ✅ Base: si existe real_amount úsalo, si no, base = 0
     const baseNum = Number(hasReal ? requisition.real_amount : 0);
     setRealAmountBase(Number.isFinite(baseNum) ? baseNum : 0);
 
-    // ✅ Reset flags "normal" al cargar
     setRealAmountPendingDelta(0);
     setRealAmountNeedsUpdate(false);
     setRealAmountCaptured(true);
 
-    // ✅ Draft normal
     setRealAmountDraft(!hasReal ? "" : String(requisition.real_amount));
 
-    // ✅ Caso especial: requisición con items pero sin real_amount
     const itemsSum = sumEstimatedTotals(requisition.items);
     if (adminLike && !hasReal && itemsSum > 0) {
       setRealAmountBase(0);
@@ -419,11 +410,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       setRealAmountReason("");
     }
 
-    // al recibir requisition “fresca”, no hay cambios locales
     setHasUnsavedChanges(false);
   }, [requisition, adminLike]);
 
-  // ✅ Autollenado sugerido: base + delta (solo cuando hay pendiente)
+  // ✅ Autollenado sugerido: base + delta
   useEffect(() => {
     if (!adminLike) return;
     if (!realAmountNeedsUpdate) return;
@@ -519,7 +509,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     };
   }, [form.product]);
 
-  // ✅ precargar descripciones para TODOS los productos que estén en items (para mostrar texto en tabla)
+  // ✅ precargar descripciones para TODOS los productos que estén en items
   useEffect(() => {
     if (step !== 2) return;
     const productIds = Array.from(new Set((items || []).map((it) => String(it.product)).filter(Boolean)));
@@ -529,9 +519,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     let cancelled = false;
     async function prefetch() {
       try {
-        const results = await Promise.allSettled(
-          missing.map((pid) => apiClient.get(STEP2_SPECS.itemDescriptionsUrl(pid)))
-        );
+        const results = await Promise.allSettled(missing.map((pid) => apiClient.get(STEP2_SPECS.itemDescriptionsUrl(pid))));
         if (cancelled) return;
 
         const patch = {};
@@ -627,21 +615,17 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const totalNum = Number((qty * unitCostNum).toFixed(2));
 
-    // ✅ conseguir texto desde descOptions o cache (para mostrar bonito sin esperar al backend)
     const selected = (descOptions || []).find((d) => String(d.id) === String(description));
     const descTextLocal = selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
-    const descDisplayLocal = descTextLocal
-      ? `${descTextLocal} (ID: ${Number(description)})`
-      : `ID: ${Number(description)}`;
+    const descDisplayLocal = descTextLocal ? `${descTextLocal} (ID: ${Number(description)})` : `ID: ${Number(description)}`;
 
     const normalized = {
       _cid: _cid || `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-      id: id ?? undefined,
+      id: id ?? undefined, // 👈 NO es id temporal, es "undefined" si es nuevo
       product: Number(product),
       quantity: qty,
       unit: Number(unit),
       description: Number(description),
-      // ✅ UI fields
       description_text: descTextLocal,
       description_display: descDisplayLocal,
       estimated_unit_cost: Number(unitCostNum.toFixed(2)),
@@ -650,9 +634,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const isNewRow = !_cid;
 
-    // ✅ Delta para monto real:
-    // - nuevo: +total
-    // - edición: +(nuevoTotal - viejoTotal)
     if (adminLike) {
       if (isNewRow) {
         markRealAmountPending(totalNum);
@@ -705,7 +686,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const deleteRow = (_cid) => {
     if (!window.confirm("¿Eliminar este artículo?")) return;
 
-    // ✅ Delta negativo al eliminar
     if (adminLike) {
       const row = (items || []).find((r) => String(r._cid) === String(_cid));
       const oldTotal = Number(row?.estimated_total);
@@ -716,7 +696,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     setItems((prev) => prev.filter((r) => r._cid !== _cid));
     setHasUnsavedChanges(true);
 
-    // si estabas editando justo esa fila, resetea el form
     if (String(form._cid) === String(_cid)) {
       setForm({
         _cid: null,
@@ -800,7 +779,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       const resp = await apiClient.post(STEP2_SPECS.itemDescriptionsPostUrl, payload);
 
-      // Refresh description lists when relevant
       if (String(form.product) === String(registerForm.product)) {
         try {
           const refresh = await apiClient.get(STEP2_SPECS.itemDescriptionsUrl(form.product));
@@ -818,7 +796,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         } catch {}
       }
 
-      // Preselect the new description + set unit cost too
       setFormPatched({
         product: String(registerForm.product),
         description: String(resp.data?.id ?? ""),
@@ -838,15 +815,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   /* ─────────────────────────── SAVE (PUT) ────────────────────────────────── */
   const doSaveAll = async ({ silent = false, bypassRealAmountBlock = false } = {}) => {
-    // ✅ NUEVO: si no confirma costo, NO se puede guardar
     if (!ackCostRealistic) {
-      if (!silent) {
-        alert('Debes confirmar "costo aproximado pero realista" para poder guardar.');
-      }
+      if (!silent) alert('Debes confirmar "costo aproximado pero realista" para poder guardar.');
       throw new Error("Blocked: ack cost realistic required");
     }
 
-    // ✅ Bloqueo por monto real (admin)
     if (!bypassRealAmountBlock && disableSave) {
       if (!silent) {
         alert(
@@ -856,10 +829,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       throw new Error("Blocked: real amount required");
     }
 
-    // ✅ NO mandar description_text / description_display al backend
-    const cleanItems = items.map(({ _cid, description_text, description_display, ...rest }) => {
+    // ✅ Limpieza robusta: NO mandar ids que no sean int>0
+    const cleanItems = (items || []).map(({ _cid, description_text, description_display, ...rest }) => {
       const out = { ...rest };
-      if (!out.id) delete out.id;
+      if (!isRealId(out.id)) delete out.id;
       return out;
     });
 
@@ -884,11 +857,54 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const resp = await apiClient.put(`/requisitions/${requisition.id}/`, payload);
 
-    onSaved?.(resp.data);
+    // ✅ REHIDRATACIÓN: aquí está el fix del “pendiente de recargar”
+    const updated = resp.data;
+
+    // sincroniza header/obs/ack/items inmediatamente (sin reload)
+    try {
+      setHeaderForm((prev) => ({
+        ...prev,
+        requesting_department: coerceId(updated.requesting_department),
+        project: coerceId(updated.project),
+        funding_source: coerceId(updated.funding_source),
+        budget_unit: coerceId(updated.budget_unit),
+        agreement: coerceId(updated.agreement),
+        category: coerceId(updated.category),
+        tender: coerceId(updated.tender),
+        external_service: coerceId(updated.external_service),
+        requisition_reason: updated.requisition_reason || "",
+        status: updated.status || prev.status,
+      }));
+      setObservations(updated.observations || "");
+      setAckCostRealistic(Boolean(updated.ack_cost_realistic));
+
+      setItems(
+        (updated.items || []).map((it) => ({
+          _cid: String(it.id),
+          id: it.id,
+          product: coerceId(it.product),
+          quantity: Number(it.quantity ?? 0),
+          unit: coerceId(it.unit),
+          description: coerceId(it.description),
+          description_text: it.description_text || "",
+          description_display: it.description_display || "",
+          estimated_unit_cost:
+            it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
+          estimated_total:
+            it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
+        }))
+      );
+
+      setRealAmountLogs(Array.isArray(updated.real_amount_logs) ? updated.real_amount_logs : []);
+    } catch {
+      // si algo cambia en el shape, no rompas guardado
+    }
+
+    onSaved?.(updated);
     setHasUnsavedChanges(false);
 
     if (!silent) alert(`Requisición #${requisition.id} guardada correctamente.`);
-    return resp.data;
+    return updated;
   };
 
   const saveAll = async () => {
@@ -910,14 +926,21 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   /* ───────────────────── Admin: guardar monto real ───────────────────────── */
   const saveRealAmount = async () => {
-    // ✅ Wrapper catch: ignora Blocked: sin spamear
     try {
       if (!adminLike) {
         alert("Solo administradores pueden capturar el monto real.");
         return;
       }
 
-      // ✅ NUEVO: no permitir capturar monto real si no confirmó costo aproximado realista
+      // ✅ Mantienes tu bloqueo actual
+      if (quoteDraftInvalid) {
+        window.alert(
+          "Tienes una cotización seleccionada pero sin partidas marcadas.\n\n" +
+            "Completa los checkboxes o quita el PDF para poder capturar el monto real."
+        );
+        throw new Error("Blocked: quote draft incomplete");
+      }
+
       if (!ackCostRealistic) {
         window.alert(
           'Para capturar el monto real, primero marca: "Confirmo que el costo aproximado pero realista ha sido verificado (requisito para imprimir/exportar PDF)."'
@@ -925,10 +948,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         throw new Error("Blocked: ack cost realistic required");
       }
 
-      // ✅ no permitir monto real si no hay partidas / total estimado <= 0
-      const hasItems = Array.isArray(items) && items.length > 0;
+      const hasItemsLocal = Array.isArray(items) && items.length > 0;
       const itemsSum = sumEstimatedTotals(items);
-      if (!hasItems || !(itemsSum > 0)) {
+      if (!hasItemsLocal || !(itemsSum > 0)) {
         alert("No puedes capturar el monto real si la requisición no tiene partidas registradas.");
         throw new Error("Blocked: real amount requires items");
       }
@@ -947,13 +969,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       setBusyRealAmount(true);
       try {
-        // 1) Guardar en backend
         const res = await apiClient.post(`/requisitions/${requisition.id}/set_real_amount/`, {
           real_amount: realAmountDraft,
           reason,
         });
 
-        // 2) Si el endpoint regresa algo, úsalo; si no, usa lo capturado
         const data = res?.data ?? {};
         const savedNum = Number(data.real_amount ?? amountNum);
         const safeSavedNum = Number.isFinite(savedNum) ? savedNum : amountNum;
@@ -961,7 +981,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         setRealAmountBase(safeSavedNum);
         setRealAmountDraft(String(data.real_amount ?? safeSavedNum.toFixed(2)));
 
-        // 3) Intentar refrescar logs/monto (opcional)
         try {
           const refreshed = await apiClient.get(`/requisitions/${requisition.id}/`);
           const r = refreshed.data;
@@ -969,29 +988,22 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
           const newValNum = Number(r.real_amount ?? safeSavedNum);
           setRealAmountBase(Number.isFinite(newValNum) ? newValNum : safeSavedNum);
 
-          setRealAmountDraft(
-            r.real_amount === null || typeof r.real_amount === "undefined" ? "" : String(r.real_amount)
-          );
+          setRealAmountDraft(r.real_amount === null || typeof r.real_amount === "undefined" ? "" : String(r.real_amount));
 
           setRealAmountLogs(Array.isArray(r.real_amount_logs) ? r.real_amount_logs : []);
           onSaved?.(r);
-        } catch {
-          // no-op
-        }
+        } catch {}
 
-        // 4) Desbloquear guardado local
         setRealAmountPendingDelta(0);
         setRealAmountNeedsUpdate(false);
         setRealAmountCaptured(true);
         setRealAmountReason("");
 
-        // 5) Auto-guardado (Camino B) con bypass
         if (hasUnsavedChanges) {
           try {
             setBusySave(true);
             await doSaveAll({ silent: true, bypassRealAmountBlock: true });
           } catch (err) {
-            // ✅ no spamear "Blocked:" en auto-save
             const msg = String(err?.message || "");
             if (!msg.includes("Blocked:")) console.error(err);
           } finally {
@@ -1076,9 +1088,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               {/* Fecha de creación (read-only) */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Fecha de creación</label>
-                <div className="px-2 py-1 border rounded bg-gray-100 text-gray-700">
-                  {headerForm.created_at || "—"}
-                </div>
+                <div className="px-2 py-1 border rounded bg-gray-100 text-gray-700">{headerForm.created_at || "—"}</div>
               </div>
 
               {/* Motivos */}
@@ -1092,28 +1102,20 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 />
               </div>
 
-              {/* Monto real (solo lectura para no-admin; útil para todos) */}
+              {/* Monto real (solo lectura) */}
               <div className="md:col-span-2 border rounded p-3 bg-gray-50">
                 <div className="text-sm">
                   <strong>Monto real</strong>: {fmtMoney(requisition.real_amount)}
                 </div>
                 <div className="text-[11px] text-gray-500 mt-1">
-                  {loadingMe
-                    ? "Verificando permisos..."
-                    : adminLike
-                    ? "Admins pueden capturarlo en Paso 2."
-                    : "Solo admins pueden capturarlo."}
+                  {loadingMe ? "Verificando permisos..." : adminLike ? "Admins pueden capturarlo en Paso 2." : "Solo admins pueden capturarlo."}
                 </div>
               </div>
             </div>
           )}
 
           <div className="mt-6 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handleCancelToList}
-              className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300"
-            >
+            <button type="button" onClick={handleCancelToList} className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300">
               Cancelar
             </button>
 
@@ -1141,7 +1143,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             <LoadingSpinner />
           ) : (
             <>
-              {/* ✅ Aviso de bloqueo de guardado */}
               {adminLike && realAmountNeedsUpdate && !realAmountCaptured && (
                 <div className="mb-4 border border-amber-300 bg-amber-50 text-amber-900 rounded p-3 text-sm">
                   <div className="font-semibold">No puedes guardar cambios todavía.</div>
@@ -1394,6 +1395,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 </div>
               </div>
 
+              {/* ✅ Panel de Cotizaciones (PDF) */}
+              <RequisitionQuotesPanel requisitionId={requisition.id} items={items} onDraftInvalidChange={setQuoteDraftInvalid} />
+
               {/* ✅ Checkbox ack_cost_realistic */}
               <div className="mt-6 border rounded p-3 bg-gray-50">
                 <label className="flex items-start gap-2">
@@ -1440,16 +1444,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       />
                       {realAmountNeedsUpdate && (
                         <div className="text-[11px] text-amber-800 mt-1">
-                          Sugerido = monto real anterior ({fmtMoney(realAmountBase)}) + delta de partidas (
-                          {fmtMoney(realAmountPendingDelta)}).
+                          Sugerido = monto real anterior ({fmtMoney(realAmountBase)}) + delta de partidas ({fmtMoney(realAmountPendingDelta)}).
                         </div>
                       )}
                     </div>
 
                     <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Motivo del cambio (obligatorio)
-                      </label>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Motivo del cambio (obligatorio)</label>
                       <input
                         type="text"
                         className="w-full border rounded px-2 py-1"
@@ -1467,38 +1468,36 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     <div className="md:col-span-3 flex justify-end">
                       <button
                         type="button"
-                        disabled={busyRealAmount || items.length === 0 || disableRealAmountByAck}
+                        disabled={busyRealAmount || items.length === 0 || disableRealAmountByAck || disableRealAmountByQuoteDraft}
                         onClick={saveRealAmount}
                         className={`px-4 py-2 rounded text-white ${
-                          busyRealAmount || items.length === 0 || disableRealAmountByAck
+                          busyRealAmount || items.length === 0 || disableRealAmountByAck || disableRealAmountByQuoteDraft
                             ? "bg-amber-300"
                             : "bg-amber-600 hover:bg-amber-700"
                         }`}
                         title={
-                          disableRealAmountByAck
-                            ? 'Primero marca la verificación del costo aproximado pero realista.'
-                            : items.length === 0
-                            ? "Para capturar monto real, primero registra al menos una partida."
-                            : ""
+                          disableRealAmountByQuoteDraft
+                            ? "Hay una cotización seleccionada sin partidas marcadas (completa o quita el PDF)."
+                            : disableRealAmountByAck
+                              ? 'Primero marca la verificación del costo aproximado pero realista.'
+                              : items.length === 0
+                                ? "Para capturar monto real, primero registra al menos una partida."
+                                : ""
                         }
                       >
                         {busyRealAmount
                           ? "Guardando..."
-                          : disableRealAmountByAck
-                          ? "Guardar monto real (verifica costo)"
-                          : "Guardar monto real (con auditoría)"}
+                          : disableRealAmountByQuoteDraft
+                            ? "Guardar monto real (cotización incompleta)"
+                            : disableRealAmountByAck
+                              ? "Guardar monto real (verifica costo)"
+                              : "Guardar monto real (con auditoría)"}
                       </button>
                     </div>
 
-                    {adminLike && disableRealAmountByAck && (
+                    {adminLike && disableRealAmountByQuoteDraft && (
                       <div className="md:col-span-3 text-[11px] text-amber-800 mt-1">
-                        Para capturar monto real, primero marca la verificación del costo aproximado pero realista.
-                      </div>
-                    )}
-
-                    {adminLike && items.length === 0 && (
-                      <div className="md:col-span-3 text-[11px] text-amber-800 mt-1">
-                        Para capturar monto real, primero registra al menos una partida.
+                        Completa la cotización (marca partidas) o quita el PDF para poder capturar el monto real.
                       </div>
                     )}
 
@@ -1559,11 +1558,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <button type="button" onClick={goPrev} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">
                     Anterior
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCancelToList}
-                    className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300"
-                  >
+                  <button type="button" onClick={handleCancelToList} className="px-4 py-2 rounded bg-slate-200 hover:bg-slate-300">
                     Cancelar
                   </button>
                 </div>
@@ -1579,17 +1574,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     disableSaveByAck
                       ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
                       : disableSave
-                      ? "Debes capturar el monto real antes de guardar cambios."
-                      : ""
+                        ? "Debes capturar el monto real antes de guardar cambios."
+                        : ""
                   }
                 >
-                  {busySave
-                    ? "Guardando..."
-                    : disableSaveByAck
-                    ? "Guardar (confirma costo)"
-                    : disableSave
-                    ? "Guardar (bloqueado)"
-                    : "Guardar"}
+                  {busySave ? "Guardando..." : disableSaveByAck ? "Guardar (confirma costo)" : disableSave ? "Guardar (bloqueado)" : "Guardar"}
                 </button>
               </div>
             </>
@@ -1645,11 +1634,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             </div>
 
             <div className="flex justify-end">
-              <button
-                type="button"
-                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
-                onClick={() => setShowCatalogModal(false)}
-              >
+              <button type="button" className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={() => setShowCatalogModal(false)}>
                 Cerrar
               </button>
             </div>
@@ -1701,19 +1686,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             </div>
 
             <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
-                onClick={() => setShowRegisterModal(false)}
-              >
+              <button type="button" className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={() => setShowRegisterModal(false)}>
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={busyRegister}
-                className={`px-3 py-1 rounded text-white ${
-                  busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
-                }`}
+                className={`px-3 py-1 rounded text-white ${busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
               >
                 {busyRegister ? "Registrando..." : "Registrar"}
               </button>
