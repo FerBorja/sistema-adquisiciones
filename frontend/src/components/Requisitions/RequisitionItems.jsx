@@ -8,11 +8,18 @@ export default function RequisitionItems({
   items, setItems,
   requisitionNumber, setRequisitionNumber,
 
-  // ✅ NUEVO: viene del padre (create wizard)
+  // ✅ viene del padre (create wizard)
   ackCostRealistic = false,
   setAckCostRealistic = () => {},
 }) {
   const { showToast } = useToast();
+
+  const fmtMoney = (v) => {
+    if (v === null || typeof v === 'undefined' || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    return n.toFixed(2);
+  };
 
   // ============================
   // STEP 2: Registro de Partidas
@@ -79,8 +86,12 @@ export default function RequisitionItems({
       const res = await apiClient.get(`/catalogs/item-descriptions/?product=${productId}`);
       const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
       const options = arr
-        .map((d) => ({ id: d.id, label: d.text }))
-        .sort((a, b) => a.label.localeCompare(b.label, 'es'));
+        .map((d) => ({
+          id: d.id,
+          text: d.text,
+          estimated_unit_cost: d.estimated_unit_cost,
+        }))
+        .sort((a, b) => (a.text || '').localeCompare(b.text || '', 'es'));
       setDescOptions(options);
     } catch (e) {
       console.error('Error loading item-descriptions by product:', e);
@@ -110,22 +121,39 @@ export default function RequisitionItems({
     estimated_total: '',
   });
 
+  const handleDescriptionChange = (descId) => {
+    const selected = (descOptions || []).find((d) => String(d.id) === String(descId));
+    const cost = selected?.estimated_unit_cost;
+
+    setNewItem((p) => {
+      const nextCost = cost !== null && typeof cost !== 'undefined' && cost !== '' ? String(cost) : '';
+      const nextTotal = computeTotal(p.quantity, nextCost);
+      return {
+        ...p,
+        description: descId,
+        description_label: selected?.text || '',
+        estimated_unit_cost: nextCost,
+        estimated_total: nextTotal,
+      };
+    });
+  };
+
   const addItem = () => {
     const qty = Number(newItem.quantity);
-    const unitCost = newItem.estimated_unit_cost === '' ? NaN : Number(newItem.estimated_unit_cost);
-    const total = Number(newItem.estimated_total);
+    const unitCost = Number(newItem.estimated_unit_cost);
 
     if (!newItem.product) return showToast('Selecciona el Objeto del Gasto (Producto).', 'error');
+    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
     if (!Number.isFinite(qty) || qty <= 0) return showToast('La cantidad debe ser mayor que 0.', 'error');
     if (!newItem.unit) return showToast('Selecciona la Unidad de Medida.', 'error');
-    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
 
-    if (newItem.estimated_unit_cost !== '' && (!Number.isFinite(unitCost) || unitCost <= 0)) {
-      return showToast('El Costo unitario debe ser mayor que 0 (o déjalo vacío).', 'error');
+    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+      return showToast('El costo unitario (desde la descripción) es obligatorio y debe ser mayor que 0.', 'error');
     }
 
-    if (!Number.isFinite(total) || total <= 0) {
-      return showToast('El Monto estimado (total) debe ser mayor que 0.', 'error');
+    const totalNum = Number((qty * unitCost).toFixed(2));
+    if (!Number.isFinite(totalNum) || totalNum <= 0) {
+      return showToast('No se pudo calcular el total (cantidad × unitario).', 'error');
     }
 
     const partida = {
@@ -137,8 +165,8 @@ export default function RequisitionItems({
       unit_label: newItem.unit_label,
       description: newItem.description,
       description_label: newItem.description_label,
-      estimated_unit_cost: newItem.estimated_unit_cost === '' ? undefined : Number(unitCost.toFixed(2)),
-      estimated_total: Number(total.toFixed(2)),
+      estimated_unit_cost: Number(unitCost.toFixed(2)),
+      estimated_total: totalNum,
     };
 
     setItems((prev) => [...prev, partida]);
@@ -204,6 +232,7 @@ export default function RequisitionItems({
   const [showRegistroModal, setShowRegistroModal] = useState(false);
   const [regProductId, setRegProductId] = useState('');
   const [regDescripcion, setRegDescripcion] = useState('');
+  const [regCosto, setRegCosto] = useState('');
   const [regSaving, setRegSaving] = useState(false);
   const [regError, setRegError] = useState(null);
 
@@ -216,12 +245,15 @@ export default function RequisitionItems({
     setRegError(null);
     setShowRegistroModal(true);
     if (newItem.product) setRegProductId(newItem.product);
+    setRegDescripcion('');
+    setRegCosto('');
   };
 
   const closeRegistro = () => {
     setShowRegistroModal(false);
     setRegProductId('');
     setRegDescripcion('');
+    setRegCosto('');
     setRegSaving(false);
     setRegError(null);
   };
@@ -241,18 +273,24 @@ export default function RequisitionItems({
     if (!regProductId) return setRegError("Selecciona un 'Objeto del Gasto'.");
     if (!regDescripcion.trim()) return setRegError("La 'Descripción del Producto' no puede estar vacía.");
 
+    const costNum = Number(regCosto);
+    if (!Number.isFinite(costNum) || costNum <= 0) {
+      return setRegError("El 'Costo' es obligatorio y debe ser mayor a 0.");
+    }
+
     try {
       setRegSaving(true);
 
-      const payloads = [
-        { product: regProductId, text: regDescripcion.trim() },
-        { product_id: regProductId, text: regDescripcion.trim() },
-        { producto: regProductId, descripcion: regDescripcion.trim() },
-      ];
       const endpoints = [
         '/catalogs/item-descriptions/',
         '/item-descriptions/',
         '/catalogs/descriptions/',
+      ];
+
+      const payloads = [
+        { product: Number(regProductId), text: regDescripcion.trim(), estimated_unit_cost: Number(costNum.toFixed(2)) },
+        { product_id: Number(regProductId), text: regDescripcion.trim(), estimated_unit_cost: Number(costNum.toFixed(2)) },
+        { producto: Number(regProductId), descripcion: regDescripcion.trim(), estimated_unit_cost: Number(costNum.toFixed(2)) },
       ];
 
       let created = null;
@@ -266,10 +304,21 @@ export default function RequisitionItems({
 
       const createdId = created.id ?? created.pk ?? created.uuid ?? null;
       const createdText = created.text ?? created.descripcion ?? created.name ?? created.label ?? regDescripcion.trim();
+      const createdCost = created.estimated_unit_cost ?? Number(costNum.toFixed(2));
 
       await loadDescriptionsByProduct(regProductId);
+
       if (newItem.product === regProductId && createdId) {
-        setNewItem((p) => ({ ...p, description: String(createdId), description_label: createdText }));
+        setNewItem((p) => {
+          const nextTotal = computeTotal(p.quantity, String(createdCost));
+          return {
+            ...p,
+            description: String(createdId),
+            description_label: createdText,
+            estimated_unit_cost: String(createdCost),
+            estimated_total: nextTotal,
+          };
+        });
       }
 
       showToast?.('Descripción registrada correctamente.', 'success');
@@ -320,8 +369,9 @@ export default function RequisitionItems({
       const normalized = data.map((d) => {
         const productId = String(d.product ?? d.product_id ?? d.producto ?? d.producto_id ?? '');
         const text = d.text ?? d.descripcion ?? d.name ?? d.label ?? '';
+        const cost = d.estimated_unit_cost ?? d.costo ?? d.cost ?? '';
         const productLabel = productLabelById.get(productId) || productId || '—';
-        return { id: d.id ?? d.pk ?? d.uuid ?? Math.random(), productId, productLabel, text };
+        return { id: d.id ?? d.pk ?? d.uuid ?? Math.random(), productId, productLabel, text, cost };
       });
 
       setCatalogRows(normalized);
@@ -378,7 +428,7 @@ export default function RequisitionItems({
     return pages;
   }, [currentPage, totalPages]);
 
-  // ✅ Handlers LIMPIOS (sin inline)
+  // ✅ Handlers LIMPIOS
   const handleOpenCatalog = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -422,7 +472,9 @@ export default function RequisitionItems({
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
 
+      {/* ✅ NUEVO ORDEN + unitario/total READONLY */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end mb-3">
+        {/* Objeto del Gasto */}
         <div className="md:col-span-4">
           <label className="block mb-1 font-medium">Objeto del Gasto</label>
           <select
@@ -436,6 +488,11 @@ export default function RequisitionItems({
                 product_label: label,
                 description: '',
                 description_label: '',
+                estimated_unit_cost: '',
+                estimated_total: '',
+                quantity: '',
+                unit: '',
+                unit_label: '',
               }));
               loadDescriptionsByProduct(id);
             }}
@@ -448,11 +505,30 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        <div className="md:col-span-2">
+        {/* Descripción */}
+        <div className="md:col-span-8">
+          <label className="block mb-1 font-medium">Descripción</label>
+          <select
+            value={newItem.description}
+            onChange={(e) => handleDescriptionChange(e.target.value)}
+            disabled={!newItem.product}
+            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
+          >
+            <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
+            {descOptions.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.text}{d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Cantidad */}
+        <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Cantidad</label>
           <input
             type="number"
-            min="0"
+            min="1"
             step="1"
             value={newItem.quantity}
             onChange={(e) => {
@@ -460,14 +536,16 @@ export default function RequisitionItems({
               setNewItem((p) => ({
                 ...p,
                 quantity: val,
-                estimated_total: computeTotal(val, p.estimated_unit_cost) || p.estimated_total,
+                estimated_total: computeTotal(val, p.estimated_unit_cost),
               }));
             }}
-            className="border p-2 w-full rounded"
+            disabled={!newItem.description}
+            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
         </div>
 
-        <div className="md:col-span-2">
+        {/* Unidad */}
+        <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Unidad de Medida</label>
           <select
             value={newItem.unit}
@@ -476,7 +554,8 @@ export default function RequisitionItems({
               const label = e.target.options[e.target.selectedIndex]?.text || '';
               setNewItem((p) => ({ ...p, unit: id, unit_label: label }));
             }}
-            className="border p-2 w-full rounded"
+            disabled={!newItem.description}
+            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">Seleccione Unidad</option>
             {units.map((u) => (
@@ -485,56 +564,35 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        <div className="md:col-span-2">
+        {/* Costo unitario (READONLY) */}
+        <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Costo unitario</label>
           <input
             type="number"
             min="0"
             step="0.01"
             value={newItem.estimated_unit_cost}
-            onChange={(e) => {
-              const val = e.target.value;
-              setNewItem((p) => ({
-                ...p,
-                estimated_unit_cost: val,
-                estimated_total: computeTotal(p.quantity, val) || p.estimated_total,
-              }));
-            }}
-            className="border p-2 w-full rounded"
+            readOnly
+            disabled={!newItem.description}
+            className="border p-2 w-full rounded bg-gray-100"
             placeholder="0.00"
           />
+          <div className="text-[11px] text-gray-500 mt-1">Se llena automáticamente desde la descripción.</div>
         </div>
 
-        <div className="md:col-span-2">
+        {/* Total (READONLY) */}
+        <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Monto estimado (total)</label>
           <input
             type="number"
             min="0"
             step="0.01"
             value={newItem.estimated_total}
-            onChange={(e) => setNewItem((p) => ({ ...p, estimated_total: e.target.value }))}
-            className="border p-2 w-full rounded"
+            readOnly
+            className="border p-2 w-full rounded bg-gray-100"
             placeholder="0.00"
           />
-        </div>
-
-        <div className="md:col-span-12">
-          <label className="block mb-1 font-medium">Descripción</label>
-          <select
-            value={newItem.description}
-            onChange={(e) => {
-              const id = e.target.value;
-              const label = e.target.options[e.target.selectedIndex]?.text || '';
-              setNewItem((p) => ({ ...p, description: id, description_label: label }));
-            }}
-            disabled={!newItem.product}
-            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
-          >
-            <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
-            {descOptions.map((d) => (
-              <option key={d.id} value={d.id}>{d.label}</option>
-            ))}
-          </select>
+          <div className="text-[11px] text-gray-500 mt-1">Se calcula automáticamente (cantidad × unitario).</div>
         </div>
       </div>
 
@@ -690,18 +748,20 @@ export default function RequisitionItems({
                   <tr>
                     <th className="px-3 py-2 text-left">Objeto del Gasto</th>
                     <th className="px-3 py-2 text-left">Descripción</th>
+                    <th className="px-3 py-2 text-right">Costo</th>
                   </tr>
                 </thead>
                 <tbody>
                   {catalogLoading ? (
-                    <tr><td colSpan={2} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
+                    <tr><td colSpan={3} className="px-3 py-6 text-center text-gray-500">Cargando...</td></tr>
                   ) : pageRows.length === 0 ? (
-                    <tr><td colSpan={2} className="px-3 py-6 text-center text-gray-500">Sin resultados.</td></tr>
+                    <tr><td colSpan={3} className="px-3 py-6 text-center text-gray-500">Sin resultados.</td></tr>
                   ) : (
                     pageRows.map((r) => (
                       <tr key={r.id} className="border-t">
                         <td className="px-3 py-2">{r.productLabel}</td>
                         <td className="px-3 py-2">{r.text}</td>
+                        <td className="px-3 py-2 text-right">{fmtMoney(r.cost)}</td>
                       </tr>
                     ))
                   )}
@@ -809,6 +869,19 @@ export default function RequisitionItems({
                   value={regDescripcion}
                   onChange={(e) => setRegDescripcion(e.target.value)}
                   placeholder="Escribe la nueva descripción"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Costo (obligatorio)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="w-full border rounded px-3 py-2"
+                  value={regCosto}
+                  onChange={(e) => setRegCosto(e.target.value)}
+                  placeholder="0.00"
                 />
               </div>
             </div>

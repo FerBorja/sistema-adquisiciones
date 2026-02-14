@@ -97,6 +97,17 @@ class ItemDescription(models.Model):
         validators=[MinValueValidator(Decimal("0.01"))],
     )
 
+    # ✅ NUEVO: auditoría de alta (quién y cuándo lo creó)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_item_descriptions",
+        editable=False,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(

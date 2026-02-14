@@ -5,6 +5,7 @@ from requisitions.models import (
     UnitOfMeasurement, Product, ItemDescription
 )
 
+
 class DepartmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Department
@@ -66,12 +67,38 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ItemDescriptionSerializer(serializers.ModelSerializer):
+    created_by_email = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = ItemDescription
-        fields = ['id', 'product', 'text']  # <-- include product
+        fields = [
+            'id',
+            'product',
+            'text',
+            'estimated_unit_cost',   # ✅ costo del catálogo
+            'created_by',            # ✅ auditoría
+            'created_by_email',      # ✅ útil para UI
+            'created_at',            # ✅ auditoría
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_email', 'created_at']
+
+    def get_created_by_email(self, obj):
+        return getattr(obj.created_by, "email", None)
 
     def validate_text(self, v):
         v = ' '.join((v or '').split())
         if not v:
             raise serializers.ValidationError('Este campo no puede estar vacío.')
+        return v
+
+    def validate_estimated_unit_cost(self, v):
+        """
+        ✅ Costo obligatorio SOLO al crear.
+        """
+        if self.instance is None:
+            if v is None:
+                raise serializers.ValidationError("El costo es obligatorio al registrar un nuevo artículo.")
+            # (extra) por si llega 0 o negativo, mensaje más claro:
+            if v <= 0:
+                raise serializers.ValidationError("Captura un costo válido (> 0).")
         return v

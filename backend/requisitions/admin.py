@@ -71,8 +71,9 @@ class ProductAdmin(admin.ModelAdmin):
 
 @admin.register(ItemDescription)
 class ItemDescriptionAdmin(admin.ModelAdmin):
-    list_display = ("text",)
-    search_fields = ("text",)
+    list_display = ("text", "product", "estimated_unit_cost", "created_by", "created_at")
+    search_fields = ("text", "product__description", "created_by__email")
+    list_filter = ("product",)
 
 
 # ---------- Inline for items inside Requisition ----------

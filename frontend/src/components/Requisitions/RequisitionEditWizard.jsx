@@ -5,14 +5,10 @@ import LoadingSpinner from "../UI/LoadingSpinner";
 
 /* ────────────────────────────────────────────────────────────────────────────
    Step 1 catalog endpoints: try multiple candidates until one works.
+   NOTE: administrative_unit NO es catálogo (es CharField editable=False en backend),
+   así que no debe pedirse aquí.
 ---------------------------------------------------------------------------- */
 const CATALOG_CANDIDATES = {
-  administrative_unit: [
-    "/catalogs/administrative-units/",
-    "/catalogs/administrative_units/",
-    "/catalogs/admin-units/",
-    "/catalogs/admin_units/",
-  ],
   requesting_department: [
     "/catalogs/departments/",
     "/catalogs/requesting-departments/",
@@ -28,7 +24,6 @@ const CATALOG_CANDIDATES = {
 };
 
 const CATALOG_META = {
-  administrative_unit: { uiLabel: "Unidad Administrativa" },
   requesting_department: { uiLabel: "Departamento Solicitante" },
   project: { uiLabel: "Proyecto" },
   funding_source: { uiLabel: "Fuente de Financiamiento" },
@@ -114,7 +109,11 @@ function SelectField({ label, value, onChange, options, getId, getLabel, placeho
   return (
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      <select className="w-full border rounded px-2 py-1" value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        className="w-full border rounded px-2 py-1"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
         <option value="">{`— ${placeholder} —`}</option>
         {(options || []).map((opt) => {
           const id = getId(opt);
@@ -140,7 +139,11 @@ function Modal({ title, onClose, children }) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button type="button" className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={onClose}>
+          <button
+            type="button"
+            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300"
+            onClick={onClose}
+          >
             ✕
           </button>
         </div>
@@ -158,7 +161,7 @@ async function fetchMeFirstOk() {
     try {
       const resp = await apiClient.get(u);
       if (resp?.data) return resp.data;
-    } catch (e) {
+    } catch {
       // silencio; probamos el siguiente
     }
   }
@@ -176,7 +179,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   /* ───────────────────────── Step 1: editable header ─────────────────────── */
   const [headerForm, setHeaderForm] = useState({
-    administrative_unit: "",
+    administrative_unit: "", // read-only (texto), NO catálogo
     requesting_department: "",
     project: "",
     funding_source: "",
@@ -236,7 +239,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     setHeaderForm((prev) => ({
       ...prev,
-      administrative_unit: coerceId(requisition.administrative_unit),
+      administrative_unit: requisition.administrative_unit || "",
       requesting_department: coerceId(requisition.requesting_department),
       project: coerceId(requisition.project),
       funding_source: coerceId(requisition.funding_source),
@@ -252,9 +255,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     setAckCostRealistic(Boolean(requisition.ack_cost_realistic));
 
-    // Admin: init real amount + logs si vienen
     setRealAmount(
-      requisition.real_amount === null || typeof requisition.real_amount === "undefined" ? "" : String(requisition.real_amount)
+      requisition.real_amount === null || typeof requisition.real_amount === "undefined"
+        ? ""
+        : String(requisition.real_amount)
     );
     setRealAmountLogs(Array.isArray(requisition.real_amount_logs) ? requisition.real_amount_logs : []);
   }, [requisition]);
@@ -264,9 +268,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     async function loadAll() {
       setLoadingStep1(true);
       try {
-        const keys = Object.keys(CATALOG_CANDIDATES);
+        const keys = Object.keys(CATALOG_META);
         const results = await Promise.allSettled(keys.map((k) => fetchFirstOk(CATALOG_CANDIDATES[k])));
         if (cancelled) return;
+
         const next = {};
         results.forEach((res, idx) => {
           const key = keys[idx];
@@ -298,14 +303,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
 
   const [form, setForm] = useState({
-    _cid: null, // id local para UI (si el item no existe en backend)
-    id: null, // id real del backend (si existe)
+    _cid: null,
+    id: null,
     product: "",
     quantity: "",
     unit: "",
     description: "",
-    estimated_unit_cost: "", // opcional
-    estimated_total: "", // requerido (si no se puede calcular)
+    estimated_unit_cost: "",
+    estimated_total: "",
   });
 
   // Modals for “Ver Catálogo” & “Registrar”
@@ -313,7 +318,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [catalogModalProduct, setCatalogModalProduct] = useState("");
   const [catalogModalDescs, setCatalogModalDescs] = useState([]);
-  const [registerForm, setRegisterForm] = useState({ product: "", text: "" });
+
+  // ✅ incluye costo (obligatorio)
+  const [registerForm, setRegisterForm] = useState({ product: "", text: "", estimated_unit_cost: "" });
   const [busyRegister, setBusyRegister] = useState(false);
 
   const [busySave, setBusySave] = useState(false);
@@ -323,15 +330,18 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     setItems(
       (requisition.items || []).map((it) => ({
-        _cid: String(it.id), // key UI estable
+        _cid: String(it.id),
         id: it.id,
         product: coerceId(it.product),
         quantity: Number(it.quantity ?? 0),
         unit: coerceId(it.unit),
         description: coerceId(it.description),
         estimated_unit_cost:
-          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
-        estimated_total: it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
+          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
+            ? ""
+            : Number(it.estimated_unit_cost),
+        estimated_total:
+          it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
       }))
     );
 
@@ -344,7 +354,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     async function load() {
       setLoadingCatalogs(true);
       try {
-        const [prods, ums] = await Promise.all([apiClient.get(STEP2_SPECS.productsUrl), apiClient.get(STEP2_SPECS.unitsUrl)]);
+        const [prods, ums] = await Promise.all([
+          apiClient.get(STEP2_SPECS.productsUrl),
+          apiClient.get(STEP2_SPECS.unitsUrl),
+        ]);
         if (!cancelled) {
           setProducts(prods.data || []);
           setUnits(ums.data || []);
@@ -383,28 +396,62 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const goNext = () => setStep((s) => Math.min(2, s + 1));
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
-  // ✅ Auto-cálculo: si hay qty + unit_cost, llenamos total
+  // ✅ Auto-cálculo: cantidad × unit_cost
   const autoFillTotalIfPossible = (next) => {
     const qty = Number(next.quantity);
     const uc = Number(next.estimated_unit_cost);
     if (Number.isFinite(qty) && qty > 0 && Number.isFinite(uc) && uc > 0) {
-      const total = Number((qty * uc).toFixed(2));
+      const total = (qty * uc).toFixed(2);
       return { ...next, estimated_total: total };
     }
-    return next;
+    return { ...next, estimated_total: "" };
   };
 
   const setFormPatched = (patch) => {
     setForm((prev) => autoFillTotalIfPossible({ ...prev, ...patch }));
   };
 
+  // ✅ Handler para descripción: setea costo del catálogo + recalcula total
+  const handleDescriptionChange = (descId) => {
+    const selected = (descOptions || []).find((d) => String(d.id) === String(descId));
+    const cost = selected?.estimated_unit_cost;
+
+    setFormPatched({
+      description: descId,
+      estimated_unit_cost:
+        cost !== null && typeof cost !== "undefined" && cost !== "" ? String(cost) : "",
+    });
+  };
+
+  // ✅ Refuerzo: si ya hay descripción y llegan descOptions, sincronizamos costo con catálogo
+  useEffect(() => {
+    const did = form.description;
+    if (!did) return;
+
+    const selected = (descOptions || []).find((d) => String(d.id) === String(did));
+    if (!selected) return;
+
+    const catCost = selected.estimated_unit_cost;
+    if (catCost === null || typeof catCost === "undefined" || catCost === "") return;
+
+    const nextStr = String(catCost);
+    setForm((prev) => {
+      if (String(prev.estimated_unit_cost) === nextStr) {
+        // aun así, asegura total correcto
+        return autoFillTotalIfPossible(prev);
+      }
+      return autoFillTotalIfPossible({ ...prev, estimated_unit_cost: nextStr });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.description, descOptions]);
+
   const addOrUpdateItem = (e) => {
     e.preventDefault();
 
-    const { _cid, id, product, quantity, unit, description, estimated_unit_cost, estimated_total } = form;
+    const { _cid, id, product, quantity, unit, description, estimated_unit_cost } = form;
 
-    if (!product || !quantity || !unit || !description) {
-      alert("Completa Objeto del Gasto, Cantidad, Unidad y Descripción.");
+    if (!product || !description || !quantity || !unit) {
+      alert("Completa Objeto del Gasto, Descripción, Cantidad y Unidad.");
       return;
     }
 
@@ -414,17 +461,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       return;
     }
 
-    const totalNum = Number(estimated_total);
-    if (!Number.isFinite(totalNum) || totalNum <= 0) {
-      alert("El Monto estimado (total) debe ser mayor a 0.");
+    const unitCostNum = Number(estimated_unit_cost);
+    if (!Number.isFinite(unitCostNum) || unitCostNum <= 0) {
+      alert("El Costo unitario (desde catálogo) es obligatorio y debe ser mayor a 0.");
       return;
     }
 
-    const unitCostNum = estimated_unit_cost === "" ? "" : Number(estimated_unit_cost);
-    if (unitCostNum !== "" && (!Number.isFinite(unitCostNum) || unitCostNum <= 0)) {
-      alert("El Costo unitario estimado debe ser mayor a 0 (o déjalo vacío).");
-      return;
-    }
+    const totalNum = Number((qty * unitCostNum).toFixed(2));
 
     const normalized = {
       _cid: _cid || `tmp-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -433,8 +476,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       quantity: qty,
       unit: Number(unit),
       description: Number(description),
-      estimated_unit_cost: unitCostNum === "" ? undefined : Number(unitCostNum.toFixed(2)),
-      estimated_total: Number(totalNum.toFixed(2)),
+      estimated_unit_cost: Number(unitCostNum.toFixed(2)),
+      estimated_total: totalNum,
     };
 
     if (_cid) {
@@ -456,16 +499,19 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   };
 
   const editRow = (row) => {
-    setForm({
-      _cid: row._cid,
-      id: row.id ?? null,
-      product: String(row.product || ""),
-      quantity: String(row.quantity || ""),
-      unit: String(row.unit || ""),
-      description: String(row.description || ""),
-      estimated_unit_cost: row.estimated_unit_cost === "" ? "" : String(row.estimated_unit_cost ?? ""),
-      estimated_total: row.estimated_total === "" ? "" : String(row.estimated_total ?? ""),
-    });
+    setForm((prev) =>
+      autoFillTotalIfPossible({
+        ...prev,
+        _cid: row._cid,
+        id: row.id ?? null,
+        product: String(row.product || ""),
+        quantity: String(row.quantity || ""),
+        unit: String(row.unit || ""),
+        description: String(row.description || ""),
+        estimated_unit_cost: row.estimated_unit_cost === "" ? "" : String(row.estimated_unit_cost ?? ""),
+        estimated_total: row.estimated_total === "" ? "" : String(row.estimated_total ?? ""),
+      })
+    );
     if (step !== 2) setStep(2);
   };
 
@@ -498,7 +544,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       try {
         const resp = await apiClient.get(STEP2_SPECS.itemDescriptionsUrl(catalogModalProduct));
         if (!cancelled) setCatalogModalDescs(resp.data || []);
-      } catch (e) {
+      } catch {
         if (!cancelled) setCatalogModalDescs([]);
       }
     }
@@ -511,19 +557,32 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   /* ───────────────── “Registrar” (nuevo ItemDescription) ─────────────────── */
   const openRegisterModal = () => {
     console.log("[Wizard] openRegisterModal()");
-    setRegisterForm({ product: form.product || "", text: "" });
+    setRegisterForm({ product: form.product || "", text: "", estimated_unit_cost: "" });
     setShowRegisterModal(true);
   };
 
   const submitRegister = async (e) => {
     e.preventDefault();
+
     if (!registerForm.product || !registerForm.text.trim()) {
       alert("Selecciona Objeto del Gasto y escribe la descripción.");
       return;
     }
+
+    const costNum = Number(registerForm.estimated_unit_cost);
+    if (!Number.isFinite(costNum) || costNum <= 0) {
+      alert("Captura un costo válido (> 0).");
+      return;
+    }
+
     setBusyRegister(true);
     try {
-      const payload = { product: Number(registerForm.product), text: registerForm.text.trim() };
+      const payload = {
+        product: Number(registerForm.product),
+        text: registerForm.text.trim(),
+        estimated_unit_cost: Number(costNum.toFixed(2)),
+      };
+
       const resp = await apiClient.post(STEP2_SPECS.itemDescriptionsPostUrl, payload);
 
       // Refresh description lists when relevant
@@ -540,17 +599,19 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         } catch {}
       }
 
-      // Preselect the new description
+      // Preselect the new description + set unit cost too
       setFormPatched({
         product: String(registerForm.product),
         description: String(resp.data?.id ?? ""),
+        estimated_unit_cost: String(resp.data?.estimated_unit_cost ?? payload.estimated_unit_cost ?? ""),
       });
 
       setShowRegisterModal(false);
       alert("Descripción registrada correctamente.");
     } catch (err) {
       console.error(err);
-      alert("No se pudo registrar la descripción.");
+      const data = err?.response?.data;
+      alert(`No se pudo registrar la descripción.\n\n${data ? JSON.stringify(data, null, 2) : ""}`);
     } finally {
       setBusyRegister(false);
     }
@@ -626,7 +687,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         reason: realAmountReason.trim(),
       });
 
-      // Intentar refrescar datos (incluye logs)
       try {
         const refreshed = await apiClient.get(`/requisitions/${requisition.id}/`);
         const data = refreshed.data;
@@ -635,9 +695,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         );
         setRealAmountLogs(Array.isArray(data.real_amount_logs) ? data.real_amount_logs : []);
         onSaved?.(data);
-      } catch {
-        // Si no podemos refrescar, al menos avisamos
-      }
+      } catch {}
 
       setRealAmountReason("");
       alert("Monto real guardado con auditoría.");
@@ -678,20 +736,18 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             <LoadingSpinner />
           ) : (
             <div className="grid md:grid-cols-2 gap-4 text-sm">
-              {Object.keys(CATALOG_META)
-                .filter((key) => key !== "administrative_unit")
-                .map((key) => (
-                  <SelectField
-                    key={key}
-                    label={CATALOG_META[key].uiLabel}
-                    value={String(headerForm[key] ?? "")}
-                    onChange={(v) => onChangeHeader(key, v)}
-                    options={catalogs[key] || []}
-                    getId={getIdDefault}
-                    getLabel={getLabelDefault}
-                    placeholder={`Selecciona ${CATALOG_META[key].uiLabel.toLowerCase()}`}
-                  />
-                ))}
+              {Object.keys(CATALOG_META).map((key) => (
+                <SelectField
+                  key={key}
+                  label={CATALOG_META[key].uiLabel}
+                  value={String(headerForm[key] ?? "")}
+                  onChange={(v) => onChangeHeader(key, v)}
+                  options={catalogs[key] || []}
+                  getId={getIdDefault}
+                  getLabel={getLabelDefault}
+                  placeholder={`Selecciona ${CATALOG_META[key].uiLabel.toLowerCase()}`}
+                />
+              ))}
 
               {/* Estatus */}
               <div>
@@ -732,7 +788,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <strong>Monto real</strong>: {fmtMoney(requisition.real_amount)}
                 </div>
                 <div className="text-[11px] text-gray-500 mt-1">
-                  {loadingMe ? "Verificando permisos..." : adminLike ? "Admins pueden capturarlo en Paso 2." : "Solo admins pueden capturarlo."}
+                  {loadingMe
+                    ? "Verificando permisos..."
+                    : adminLike
+                    ? "Admins pueden capturarlo en Paso 2."
+                    : "Solo admins pueden capturarlo."}
                 </div>
               </div>
             </div>
@@ -763,15 +823,24 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             <LoadingSpinner />
           ) : (
             <>
-              {/* Inline editor */}
-              <form onSubmit={addOrUpdateItem} className="grid md:grid-cols-6 gap-3">
+              {/* ✅ NUEVO ORDEN + unitario/total READONLY */}
+              <form onSubmit={addOrUpdateItem} className="grid md:grid-cols-12 gap-3">
                 {/* Objeto del Gasto */}
-                <div className="md:col-span-2">
+                <div className="md:col-span-4">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Objeto del Gasto</label>
                   <select
                     className="w-full border rounded px-2 py-1"
                     value={form.product}
-                    onChange={(e) => setFormPatched({ product: e.target.value, description: "" })}
+                    onChange={(e) =>
+                      setFormPatched({
+                        product: e.target.value,
+                        description: "",
+                        estimated_unit_cost: "",
+                        estimated_total: "",
+                        quantity: "",
+                        unit: "",
+                      })
+                    }
                   >
                     <option value="">— Selecciona —</option>
                     {products.map((p) => (
@@ -782,8 +851,27 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   </select>
                 </div>
 
+                {/* Descripción */}
+                <div className="md:col-span-8">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Descripción</label>
+                  <select
+                    className="w-full border rounded px-2 py-1"
+                    value={form.description}
+                    onChange={(e) => handleDescriptionChange(e.target.value)}
+                    disabled={!form.product}
+                  >
+                    <option value="">{form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}</option>
+                    {descOptions.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.text}
+                        {d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Cantidad */}
-                <div>
+                <div className="md:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Cantidad</label>
                   <input
                     type="number"
@@ -791,16 +879,18 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     className="w-full border rounded px-2 py-1"
                     value={form.quantity}
                     onChange={(e) => setFormPatched({ quantity: e.target.value })}
+                    disabled={!form.description}
                   />
                 </div>
 
                 {/* Unidad */}
-                <div>
+                <div className="md:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Unidad</label>
                   <select
                     className="w-full border rounded px-2 py-1"
                     value={form.unit}
                     onChange={(e) => setFormPatched({ unit: e.target.value })}
+                    disabled={!form.description}
                   >
                     <option value="">— Selecciona —</option>
                     {units.map((u) => (
@@ -811,54 +901,37 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   </select>
                 </div>
 
-                {/* Costo unitario (opcional) */}
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Costo unitario (opcional)</label>
+                {/* Costo unitario (READONLY) */}
+                <div className="md:col-span-3">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Costo unitario</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    className="w-full border rounded px-2 py-1"
+                    className="w-full border rounded px-2 py-1 bg-gray-100"
                     value={form.estimated_unit_cost}
-                    onChange={(e) => setFormPatched({ estimated_unit_cost: e.target.value })}
+                    readOnly
                     placeholder="0.00"
+                    disabled={!form.description}
                   />
+                  <div className="text-[11px] text-gray-500 mt-1">Se llena automáticamente desde la descripción.</div>
                 </div>
 
-                {/* Monto estimado total (requerido) */}
-                <div>
+                {/* Total (READONLY) */}
+                <div className="md:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Monto estimado (total)</label>
                   <input
                     type="number"
-                    min="0"
-                    step="0.01"
-                    className="w-full border rounded px-2 py-1"
+                    className="w-full border rounded px-2 py-1 bg-gray-100"
                     value={form.estimated_total}
-                    onChange={(e) => setFormPatched({ estimated_total: e.target.value })}
+                    readOnly
                     placeholder="0.00"
                   />
-                </div>
-
-                {/* Descripción */}
-                <div className="md:col-span-4">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Descripción</label>
-                  <select
-                    className="w-full border rounded px-2 py-1"
-                    value={form.description}
-                    onChange={(e) => setFormPatched({ description: e.target.value })}
-                    disabled={!form.product}
-                  >
-                    <option value="">{form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}</option>
-                    {descOptions.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.text}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="text-[11px] text-gray-500 mt-1">Se calcula automáticamente (cantidad × unitario).</div>
                 </div>
 
                 {/* Action row */}
-                <div className="md:col-span-2 flex items-end gap-2">
+                <div className="md:col-span-12 flex items-end gap-2">
                   <button type="submit" className="px-3 py-2 rounded bg-green-600 text-white hover:bg-green-700">
                     {form._cid ? "Guardar cambios" : "Agregar"}
                   </button>
@@ -892,7 +965,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log("CLICK: Clasificador (Wizard)");
                         openClassifier();
                       }}
                       className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
@@ -907,7 +979,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log("CLICK: Ver Catálogo");
                         openCatalogModal();
                       }}
                       className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
@@ -922,7 +993,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log("CLICK: Registrar");
                         openRegisterModal();
                       }}
                       className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
@@ -998,7 +1068,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               {/* ✅ Checkbox ack_cost_realistic */}
               <div className="mt-6 border rounded p-3 bg-gray-50">
                 <label className="flex items-start gap-2">
-                  <input type="checkbox" checked={ackCostRealistic} onChange={(e) => setAckCostRealistic(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={ackCostRealistic}
+                    onChange={(e) => setAckCostRealistic(e.target.checked)}
+                  />
                   <span className="text-sm">
                     Confirmo que el <strong>costo aproximado pero realista</strong> ha sido verificado (requisito para
                     imprimir/exportar PDF).
@@ -1016,9 +1090,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 </div>
 
                 {!adminLike ? (
-                  <p className="text-sm text-gray-700 mt-2">
-                    Solo administradores pueden capturar/editar el monto real.
-                  </p>
+                  <p className="text-sm text-gray-700 mt-2">Solo administradores pueden capturar/editar el monto real.</p>
                 ) : (
                   <div className="grid md:grid-cols-3 gap-3 mt-3">
                     <div>
@@ -1115,9 +1187,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   type="button"
                   disabled={busySave}
                   onClick={saveAll}
-                  className={`px-4 py-2 rounded text-white ${
-                    busySave ? "bg-green-400" : "bg-green-600 hover:bg-green-700"
-                  }`}
+                  className={`px-4 py-2 rounded text-white ${busySave ? "bg-green-400" : "bg-green-600 hover:bg-green-700"}`}
                 >
                   {busySave ? "Guardando..." : "Guardar"}
                 </button>
@@ -1129,7 +1199,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       {/* ───────────── Modals ───────────── */}
       {showCatalogModal && (
-        <Modal onClose={() => setShowCatalogModal(false)} title="Catálogo de Descripciones (Wizard)">
+        <Modal onClose={() => setShowCatalogModal(false)} title="Catálogo de Descripciones">
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Objeto del Gasto</label>
@@ -1152,17 +1222,21 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-2 py-2 text-left">Descripción</th>
+                    <th className="px-2 py-2 text-right">Costo</th>
                   </tr>
                 </thead>
                 <tbody>
                   {catalogModalProduct && catalogModalDescs.length === 0 ? (
                     <tr>
-                      <td className="px-2 py-3 text-gray-500">Sin descripciones registradas.</td>
+                      <td className="px-2 py-3 text-gray-500" colSpan={2}>
+                        Sin descripciones registradas.
+                      </td>
                     </tr>
                   ) : (
                     catalogModalDescs.map((d) => (
                       <tr key={d.id} className="border-t">
                         <td className="px-2 py-2">{d.text}</td>
+                        <td className="px-2 py-2 text-right">{fmtMoney(d.estimated_unit_cost)}</td>
                       </tr>
                     ))
                   )}
@@ -1184,7 +1258,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       )}
 
       {showRegisterModal && (
-        <Modal onClose={() => setShowRegisterModal(false)} title="Registrar Descripción (Wizard)">
+        <Modal onClose={() => setShowRegisterModal(false)} title="Registrar Descripción">
           <form onSubmit={submitRegister} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Objeto del Gasto</label>
@@ -1213,6 +1287,19 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               />
             </div>
 
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Costo (obligatorio)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className="w-full border rounded px-2 py-1"
+                value={registerForm.estimated_unit_cost}
+                onChange={(e) => setRegisterForm((f) => ({ ...f, estimated_unit_cost: e.target.value }))}
+                placeholder="0.00"
+              />
+            </div>
+
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -1224,9 +1311,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               <button
                 type="submit"
                 disabled={busyRegister}
-                className={`px-3 py-1 rounded text-white ${
-                  busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
-                }`}
+                className={`px-3 py-1 rounded text-white ${busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
               >
                 {busyRegister ? "Registrando..." : "Registrar"}
               </button>
