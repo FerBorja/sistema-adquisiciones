@@ -1,5 +1,5 @@
 // frontend/src/components/Requisitions/RequisitionEditWizard.jsx
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import apiClient from "../../api/apiClient";
 import LoadingSpinner from "../UI/LoadingSpinner";
 
@@ -19,20 +19,12 @@ const CATALOG_CANDIDATES = {
     "/catalogs/requesting_departments/",
   ],
   project: ["/catalogs/projects/"],
-  funding_source: [
-    "/catalogs/funding-sources/",
-    "/catalogs/funding_sources/",
-    "/catalogs/funding/",
-  ],
+  funding_source: ["/catalogs/funding-sources/", "/catalogs/funding_sources/", "/catalogs/funding/"],
   budget_unit: ["/catalogs/budget-units/", "/catalogs/budget_units/"],
   agreement: ["/catalogs/agreements/"],
   category: ["/catalogs/categories/"],
   tender: ["/catalogs/tenders/"],
-  external_service: [
-    "/catalogs/external-services/",
-    "/catalogs/external_services/",
-    "/catalogs/services/",
-  ],
+  external_service: ["/catalogs/external-services/", "/catalogs/external_services/", "/catalogs/services/"],
 };
 
 const CATALOG_META = {
@@ -102,15 +94,27 @@ function labelFrom(list, id, getLabel = (r) => r.name ?? r.description ?? String
   return row ? getLabel(row) : "";
 }
 
+function fmtMoney(v) {
+  if (v === null || typeof v === "undefined" || v === "") return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  return n.toFixed(2);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString("es-MX");
+  } catch {
+    return String(iso);
+  }
+}
+
 function SelectField({ label, value, onChange, options, getId, getLabel, placeholder }) {
   return (
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      <select
-        className="w-full border rounded px-2 py-1"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
+      <select className="w-full border rounded px-2 py-1" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{`— ${placeholder} —`}</option>
         {(options || []).map((opt) => {
           const id = getId(opt);
@@ -136,11 +140,7 @@ function Modal({ title, onClose, children }) {
       >
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <button
-            type="button"
-            className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300"
-            onClick={onClose}
-          >
+          <button type="button" className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={onClose}>
             ✕
           </button>
         </div>
@@ -148,6 +148,27 @@ function Modal({ title, onClose, children }) {
       </div>
     </div>
   );
+}
+
+/* ───────────────────────── Admin detection (robusto) ─────────────────────── */
+const ME_CANDIDATES = ["/users/me/", "/users/profile/", "/auth/me/", "/me/"];
+
+async function fetchMeFirstOk() {
+  for (const u of ME_CANDIDATES) {
+    try {
+      const resp = await apiClient.get(u);
+      if (resp?.data) return resp.data;
+    } catch (e) {
+      // silencio; probamos el siguiente
+    }
+  }
+  return null;
+}
+
+function isAdminLike(me) {
+  if (!me) return false;
+  const role = String(me.role || "").toLowerCase();
+  return Boolean(me.is_superuser || me.is_staff || role === "admin" || role === "superuser");
 }
 
 export default function RequisitionEditWizard({ requisition, onSaved }) {
@@ -169,14 +190,43 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     status: "registered",
   });
 
-  // ✅ NUEVO: checkbox para permitir imprimir/exportar
+  // ✅ checkbox para permitir imprimir/exportar
   const [ackCostRealistic, setAckCostRealistic] = useState(false);
 
   const [catalogs, setCatalogs] = useState({});
   const [loadingStep1, setLoadingStep1] = useState(false);
 
+  /* ───────────────────────── Admin: monto real ───────────────────────────── */
+  const [me, setMe] = useState(null);
+  const [loadingMe, setLoadingMe] = useState(false);
+
+  const adminLike = useMemo(() => isAdminLike(me), [me]);
+
+  const [realAmount, setRealAmount] = useState("");
+  const [realAmountReason, setRealAmountReason] = useState("");
+  const [busyRealAmount, setBusyRealAmount] = useState(false);
+  const [realAmountLogs, setRealAmountLogs] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMe() {
+      setLoadingMe(true);
+      try {
+        const data = await fetchMeFirstOk();
+        if (!cancelled) setMe(data);
+      } finally {
+        if (!cancelled) setLoadingMe(false);
+      }
+    }
+    loadMe();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!requisition) return;
+
     const createdISO = requisition.created_at ? new Date(requisition.created_at) : null;
     const yyyyMMdd = createdISO
       ? `${createdISO.getFullYear()}-${String(createdISO.getMonth() + 1).padStart(2, "0")}-${String(
@@ -200,8 +250,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       status: requisition.status || "registered",
     }));
 
-    // ✅ NUEVO
     setAckCostRealistic(Boolean(requisition.ack_cost_realistic));
+
+    // Admin: init real amount + logs si vienen
+    setRealAmount(
+      requisition.real_amount === null || typeof requisition.real_amount === "undefined" ? "" : String(requisition.real_amount)
+    );
+    setRealAmountLogs(Array.isArray(requisition.real_amount_logs) ? requisition.real_amount_logs : []);
   }, [requisition]);
 
   useEffect(() => {
@@ -242,7 +297,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   const [descOptions, setDescOptions] = useState([]);
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
 
-  // ✅ form del editor de partidas: ahora incluye costos
   const [form, setForm] = useState({
     _cid: null, // id local para UI (si el item no existe en backend)
     id: null, // id real del backend (si existe)
@@ -276,13 +330,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         unit: coerceId(it.unit),
         description: coerceId(it.description),
         estimated_unit_cost:
-          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
-            ? ""
-            : Number(it.estimated_unit_cost),
-        estimated_total:
-          it.estimated_total === null || typeof it.estimated_total === "undefined"
-            ? ""
-            : Number(it.estimated_total),
+          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
+        estimated_total: it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
       }))
     );
 
@@ -295,10 +344,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     async function load() {
       setLoadingCatalogs(true);
       try {
-        const [prods, ums] = await Promise.all([
-          apiClient.get(STEP2_SPECS.productsUrl),
-          apiClient.get(STEP2_SPECS.unitsUrl),
-        ]);
+        const [prods, ums] = await Promise.all([apiClient.get(STEP2_SPECS.productsUrl), apiClient.get(STEP2_SPECS.unitsUrl)]);
         if (!cancelled) {
           setProducts(prods.data || []);
           setUnits(ums.data || []);
@@ -477,10 +523,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     }
     setBusyRegister(true);
     try {
-      const payload = {
-        product: Number(registerForm.product),
-        text: registerForm.text.trim(),
-      };
+      const payload = { product: Number(registerForm.product), text: registerForm.text.trim() };
       const resp = await apiClient.post(STEP2_SPECS.itemDescriptionsPostUrl, payload);
 
       // Refresh description lists when relevant
@@ -536,7 +579,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         requisition_reason: headerForm.requisition_reason ?? "",
         observations,
 
-        // ✅ NUEVO
         ack_cost_realistic: ackCostRealistic,
 
         items: cleanItems,
@@ -556,6 +598,54 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       }
     } finally {
       setBusySave(false);
+    }
+  };
+
+  /* ───────────────────── Admin: guardar monto real ───────────────────────── */
+  const saveRealAmount = async () => {
+    if (!adminLike) {
+      alert("Solo administradores pueden capturar el monto real.");
+      return;
+    }
+
+    const amountNum = Number(realAmount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      alert("Monto real debe ser mayor a 0.");
+      return;
+    }
+
+    if (!realAmountReason.trim()) {
+      alert("Escribe el motivo del cambio (obligatorio).");
+      return;
+    }
+
+    setBusyRealAmount(true);
+    try {
+      await apiClient.post(`/requisitions/${requisition.id}/set_real_amount/`, {
+        real_amount: realAmount,
+        reason: realAmountReason.trim(),
+      });
+
+      // Intentar refrescar datos (incluye logs)
+      try {
+        const refreshed = await apiClient.get(`/requisitions/${requisition.id}/`);
+        const data = refreshed.data;
+        setRealAmount(
+          data.real_amount === null || typeof data.real_amount === "undefined" ? "" : String(data.real_amount)
+        );
+        setRealAmountLogs(Array.isArray(data.real_amount_logs) ? data.real_amount_logs : []);
+        onSaved?.(data);
+      } catch {
+        // Si no podemos refrescar, al menos avisamos
+      }
+
+      setRealAmountReason("");
+      alert("Monto real guardado con auditoría.");
+    } catch (e) {
+      const data = e?.response?.data;
+      alert(`No se pudo guardar monto real.\n\n${JSON.stringify(data || {}, null, 2)}`);
+    } finally {
+      setBusyRealAmount(false);
     }
   };
 
@@ -622,9 +712,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               {/* Fecha de creación (read-only) */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Fecha de creación</label>
-                <div className="px-2 py-1 border rounded bg-gray-100 text-gray-700">
-                  {headerForm.created_at || "—"}
-                </div>
+                <div className="px-2 py-1 border rounded bg-gray-100 text-gray-700">{headerForm.created_at || "—"}</div>
               </div>
 
               {/* Motivos */}
@@ -636,6 +724,16 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   value={headerForm.requisition_reason}
                   onChange={(e) => onChangeHeader("requisition_reason", e.target.value)}
                 />
+              </div>
+
+              {/* Monto real (solo lectura para no-admin; útil para todos) */}
+              <div className="md:col-span-2 border rounded p-3 bg-gray-50">
+                <div className="text-sm">
+                  <strong>Monto real</strong>: {fmtMoney(requisition.real_amount)}
+                </div>
+                <div className="text-[11px] text-gray-500 mt-1">
+                  {loadingMe ? "Verificando permisos..." : adminLike ? "Admins pueden capturarlo en Paso 2." : "Solo admins pueden capturarlo."}
+                </div>
               </div>
             </div>
           )}
@@ -750,9 +848,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     onChange={(e) => setFormPatched({ description: e.target.value })}
                     disabled={!form.product}
                   >
-                    <option value="">
-                      {form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}
-                    </option>
+                    <option value="">{form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}</option>
                     {descOptions.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.text}
@@ -902,16 +998,101 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               {/* ✅ Checkbox ack_cost_realistic */}
               <div className="mt-6 border rounded p-3 bg-gray-50">
                 <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={ackCostRealistic}
-                    onChange={(e) => setAckCostRealistic(e.target.checked)}
-                  />
+                  <input type="checkbox" checked={ackCostRealistic} onChange={(e) => setAckCostRealistic(e.target.checked)} />
                   <span className="text-sm">
-                    Confirmo que el <strong>costo aproximado pero realista</strong> ha sido verificado
-                    (requisito para imprimir/exportar PDF).
+                    Confirmo que el <strong>costo aproximado pero realista</strong> ha sido verificado (requisito para
+                    imprimir/exportar PDF).
                   </span>
                 </label>
+              </div>
+
+              {/* ✅ Admin: Monto real + auditoría */}
+              <div className="mt-6 border rounded p-4 bg-amber-50">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Admin — Capturar monto real</h3>
+                  <div className="text-xs text-gray-600">
+                    Monto actual: <strong>{fmtMoney(requisition.real_amount)}</strong>
+                  </div>
+                </div>
+
+                {!adminLike ? (
+                  <p className="text-sm text-gray-700 mt-2">
+                    Solo administradores pueden capturar/editar el monto real.
+                  </p>
+                ) : (
+                  <div className="grid md:grid-cols-3 gap-3 mt-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Monto real</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-full border rounded px-2 py-1"
+                        value={realAmount}
+                        onChange={(e) => setRealAmount(e.target.value)}
+                        placeholder="0.00"
+                      />
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Motivo del cambio (obligatorio)</label>
+                      <input
+                        type="text"
+                        className="w-full border rounded px-2 py-1"
+                        value={realAmountReason}
+                        onChange={(e) => setRealAmountReason(e.target.value)}
+                        placeholder="Ej. Unidad Central confirmó factura / ajuste final / pagado"
+                      />
+                    </div>
+
+                    <div className="md:col-span-3 flex justify-end">
+                      <button
+                        type="button"
+                        disabled={busyRealAmount}
+                        onClick={saveRealAmount}
+                        className={`px-4 py-2 rounded text-white ${
+                          busyRealAmount ? "bg-amber-300" : "bg-amber-600 hover:bg-amber-700"
+                        }`}
+                      >
+                        {busyRealAmount ? "Guardando..." : "Guardar monto real (con auditoría)"}
+                      </button>
+                    </div>
+
+                    {/* Historial */}
+                    <div className="md:col-span-3">
+                      <h4 className="text-xs font-semibold text-gray-700 mt-2 mb-2">Historial de cambios</h4>
+
+                      {realAmountLogs.length === 0 ? (
+                        <div className="text-sm text-gray-600">Aún no hay cambios registrados.</div>
+                      ) : (
+                        <div className="border rounded bg-white overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-2 py-2 text-left">Cuándo</th>
+                                <th className="px-2 py-2 text-left">Quién</th>
+                                <th className="px-2 py-2 text-center">Antes</th>
+                                <th className="px-2 py-2 text-center">Después</th>
+                                <th className="px-2 py-2 text-left">Por qué</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {realAmountLogs.map((l) => (
+                                <tr key={l.id} className="border-t">
+                                  <td className="px-2 py-2">{fmtDateTime(l.changed_at)}</td>
+                                  <td className="px-2 py-2">{l.changed_by_email || l.changed_by || "—"}</td>
+                                  <td className="px-2 py-2 text-center">{fmtMoney(l.old_value)}</td>
+                                  <td className="px-2 py-2 text-center">{fmtMoney(l.new_value)}</td>
+                                  <td className="px-2 py-2">{l.reason || "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Observaciones */}

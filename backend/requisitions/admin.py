@@ -3,7 +3,8 @@ from django.contrib import admin
 from .models import (
     Department, Project, FundingSource, BudgetUnit, Agreement, Category,
     Tender, ExternalService, UnitOfMeasurement, Product, ItemDescription,
-    Requisition, RequisitionItem
+    Requisition, RequisitionItem,
+    RequisitionRealAmountLog,  # ✅ NUEVO
 )
 
 # ---------- Catalog admins (searchable) ----------
@@ -109,3 +110,21 @@ class RequisitionItemAdmin(admin.ModelAdmin):
     autocomplete_fields = ("requisition", "product", "unit",)
     # If Requisition list is huge, raw id is fine:
     # raw_id_fields = ("requisition",)
+
+
+# ---------- ✅ Auditoría: Real Amount Logs ----------
+
+@admin.register(RequisitionRealAmountLog)
+class RequisitionRealAmountLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "requisition", "old_value", "new_value", "changed_by", "changed_at")
+    list_filter = ("changed_at", "changed_by")
+    search_fields = ("requisition__id", "changed_by__email", "reason")
+    readonly_fields = ("requisition", "old_value", "new_value", "reason", "changed_by", "changed_at")
+    ordering = ("-changed_at",)
+
+    # (Opcional) evita que se creen/editen logs manualmente desde admin
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

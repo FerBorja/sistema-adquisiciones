@@ -1,4 +1,6 @@
 # sistema-adquisiciones/backend/requisitions/views.py
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import viewsets, permissions, status, filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import PageNumberPagination
@@ -6,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
 
-from .models import Requisition, RequisitionItem
+from .models import Requisition, RequisitionItem, RequisitionRealAmountLog
 from .serializers import RequisitionSerializer, RequisitionItemSerializer
 from .pdf_generator import generate_requisition_pdf
 
@@ -17,6 +19,24 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
     max_page_size = 100
+
+
+class IsAdminLike(permissions.BasePermission):
+    """
+    Admin “real” para este proyecto:
+    - superuser
+    - staff
+    - role admin/superuser (si tu User tiene role)
+    """
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        return bool(
+            getattr(user, "is_superuser", False)
+            or getattr(user, "is_staff", False)
+            or getattr(user, "role", "") in ("admin", "superuser")
+        )
 
 
 class RequisitionViewSet(viewsets.ModelViewSet):
@@ -84,9 +104,56 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             resp['Content-Disposition'] = f'inline; filename="requisicion_{requisition.id}.pdf"'
             return resp
         except Exception as e:
-            # Log full traceback to server console and return readable error to client
             traceback.print_exc()
             return Response({'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAdminLike])
+    def set_real_amount(self, request, pk=None):
+        """
+        ✅ Admin-only
+        Captura/actualiza monto real TOTAL de requisición y deja auditoría (quién/cuándo/por qué).
+        """
+        requisition = self.get_object()
+
+        raw_amount = request.data.get("real_amount", None)
+        reason = (request.data.get("reason") or "").strip()
+
+        if raw_amount is None or str(raw_amount).strip() == "":
+            return Response({"real_amount": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # ✅ Hacemos reason obligatorio para aceptación (por qué)
+        if not reason:
+            return Response({"reason": "Este campo es requerido (motivo del cambio)."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            new_value = Decimal(str(raw_amount)).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return Response({"real_amount": "Formato inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_value <= Decimal("0.00"):
+            return Response({"real_amount": "Debe ser mayor a 0."}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_value = requisition.real_amount
+
+        # Si no cambió, no logueamos
+        if old_value == new_value:
+            return Response({"detail": "Sin cambios."}, status=status.HTTP_200_OK)
+
+        requisition.real_amount = new_value
+        requisition.save(update_fields=["real_amount"])
+
+        RequisitionRealAmountLog.objects.create(
+            requisition=requisition,
+            old_value=old_value,
+            new_value=new_value,
+            reason=reason,
+            changed_by=request.user,
+        )
+
+        return Response(
+            {"real_amount": str(requisition.real_amount)},
+            status=status.HTTP_200_OK
+        )
 
 
 class RequisitionItemViewSet(viewsets.ModelViewSet):

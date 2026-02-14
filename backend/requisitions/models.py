@@ -141,6 +141,15 @@ class Requisition(models.Model):
     # ✅ confirmación “costo aproximado pero realista”
     ack_cost_realistic = models.BooleanField(default=False)
 
+    # ✅ ADMIN: monto real total (se captura después). Se actualiza SOLO vía endpoint con auditoría.
+    real_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.01"))],
+    )
+
     # ✅ cancelación (admin)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancelled_by = models.ForeignKey(
@@ -159,6 +168,35 @@ class Requisition(models.Model):
 
     def __str__(self):
         return f"Req #{self.id} by {getattr(self.user, 'full_name', self.user)}"
+
+
+class RequisitionRealAmountLog(models.Model):
+    """
+    Auditoría inmutable de cambios del monto real (quién/cuándo/antes/después/por qué).
+    """
+    requisition = models.ForeignKey(
+        Requisition,
+        on_delete=models.CASCADE,
+        related_name="real_amount_logs",
+    )
+    old_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    new_value = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    reason = models.TextField(blank=False, default="")  # lo hacemos obligatorio en el endpoint
+    changed_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="requisition_real_amount_changes",
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-changed_at"]
+
+    def __str__(self):
+        rid = getattr(self.requisition, "id", "?")
+        return f"Req #{rid}: {self.old_value} → {self.new_value}"
 
 
 class RequisitionItem(models.Model):

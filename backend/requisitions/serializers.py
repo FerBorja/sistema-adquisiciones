@@ -8,7 +8,7 @@ from django.core.exceptions import ObjectDoesNotExist, ValidationError as Django
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from .models import Requisition, RequisitionItem
+from .models import Requisition, RequisitionItem, RequisitionRealAmountLog
 
 
 def _money2(value: Decimal) -> Decimal:
@@ -90,8 +90,27 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class RequisitionRealAmountLogSerializer(serializers.ModelSerializer):
+    changed_by_email = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RequisitionRealAmountLog
+        fields = ["id", "old_value", "new_value", "reason", "changed_by", "changed_by_email", "changed_at"]
+        read_only_fields = fields
+
+    def get_changed_by_email(self, obj):
+        user = getattr(obj, "changed_by", None)
+        return getattr(user, "email", None) if user else None
+
+
 class RequisitionSerializer(serializers.ModelSerializer):
     items = RequisitionItemSerializer(many=True, required=False)
+
+    # ✅ Solo lectura aquí: para mantener auditoría obligatoria (solo se cambia via endpoint set_real_amount)
+    real_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    # ✅ Historial (solo lectura)
+    real_amount_logs = RequisitionRealAmountLogSerializer(many=True, read_only=True)
 
     class Meta:
         model = Requisition
@@ -143,7 +162,6 @@ class RequisitionSerializer(serializers.ModelSerializer):
         # Validar estimated_total por renglón
         bad_idx = []
         for idx, it in enumerate(items, start=1):
-            # it puede ser dict (payload) o dict de values()
             est_total = it.get("estimated_total") if isinstance(it, dict) else getattr(it, "estimated_total", None)
             if est_total in (None, ""):
                 bad_idx.append(idx)
@@ -162,6 +180,17 @@ class RequisitionSerializer(serializers.ModelSerializer):
             })
 
     def validate(self, attrs):
+        # ✅ Bloqueo duro: real_amount NO se edita por este serializer (ni admin), para no saltarse auditoría
+        req = self.context.get("request")
+        data = getattr(req, "data", {}) if req is not None else {}
+        if isinstance(data, dict) and "real_amount" in data:
+            raise ValidationError({
+                "real_amount": (
+                    "El monto real NO se edita por este endpoint. "
+                    "Usa POST /api/requisitions/{id}/set_real_amount/ (con reason) para dejar auditoría."
+                )
+            })
+
         # Candado de envío por status
         instance = getattr(self, "instance", None)
         items_data = attrs.get("items", None)  # puede venir o no
