@@ -12,6 +12,7 @@ const STATUS_LABEL = new Map([
   ['completed', 'Completado'],
   ['sent', 'Enviado a Unidad Central'],
   ['received', 'Recibido por Oficina de Administración'],
+  ['cancelled', 'Cancelado'],
 ]);
 
 const displayStatus = (value) => {

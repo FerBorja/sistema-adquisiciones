@@ -83,6 +83,7 @@ const STATUS_OPTIONS = [
   { value: "completed", label: "Completado" },
   { value: "sent", label: "Enviado a Unidad Central" },
   { value: "received", label: "Recibido por Oficina de Administración" },
+  { value: "cancelled", label: "Cancelado" },
 ];
 
 const STATUS_LABEL = new Map(STATUS_OPTIONS.map((o) => [o.value, o.label]));
@@ -244,13 +245,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   // ✅ form del editor de partidas: ahora incluye costos
   const [form, setForm] = useState({
     _cid: null, // id local para UI (si el item no existe en backend)
-    id: null,   // id real del backend (si existe)
+    id: null, // id real del backend (si existe)
     product: "",
     quantity: "",
     unit: "",
     description: "",
     estimated_unit_cost: "", // opcional
-    estimated_total: "",     // requerido (si no se puede calcular)
+    estimated_total: "", // requerido (si no se puede calcular)
   });
 
   // Modals for “Ver Catálogo” & “Registrar”
@@ -616,9 +617,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Guarda usando el identificador del backend (p. ej. <code>pending</code>, <code>approved</code>, etc.).
-                </p>
               </div>
 
               {/* Fecha de creación (read-only) */}
@@ -644,7 +642,12 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
           <div className="mt-6 flex justify-end">
             <button
-              onClick={goNext}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                goNext();
+              }}
               className="inline-flex items-center px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
             >
               Siguiente
@@ -736,9 +739,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     onChange={(e) => setFormPatched({ estimated_total: e.target.value })}
                     placeholder="0.00"
                   />
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Si llenas cantidad + costo unitario, se autocalcula.
-                  </p>
                 </div>
 
                 {/* Descripción */}
@@ -791,6 +791,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <div className="ml-auto flex items-center gap-2">
                     <button
                       type="button"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -804,28 +806,32 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
                     <button
                       type="button"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log("CLICK: Ver Catálogo (Wizard)");
+                        console.log("CLICK: Ver Catálogo");
                         openCatalogModal();
                       }}
                       className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
                     >
-                      Ver Catálogo (Wizard)
+                      Ver Catálogo
                     </button>
 
                     <button
                       type="button"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        console.log("CLICK: Registrar (Wizard)");
+                        console.log("CLICK: Registrar");
                         openRegisterModal();
                       }}
                       className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
-                      Registrar (Wizard)
+                      Registrar
                     </button>
                   </div>
                 </div>
@@ -1037,7 +1043,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               <button
                 type="submit"
                 disabled={busyRegister}
-                className={`px-3 py-1 rounded text-white ${busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"}`}
+                className={`px-3 py-1 rounded text-white ${
+                  busyRegister ? "bg-blue-400" : "bg-blue-600 hover:bg-blue-700"
+                }`}
               >
                 {busyRegister ? "Registrando..." : "Registrar"}
               </button>

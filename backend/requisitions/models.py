@@ -116,7 +116,7 @@ class Requisition(models.Model):
         ('completed', 'Completed'),
         ('sent', 'Sent to Central Unit'),
         ('received', 'Received by Admin Office'),
-        ('cancelled', 'Cancelled'),  # ✅ NUEVO
+        ('cancelled', 'Cancelled'),
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
