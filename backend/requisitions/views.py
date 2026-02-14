@@ -51,7 +51,17 @@ class RequisitionViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Requisition.objects.all()
+
+        # ✅ Prefetch para requisición + items anidados (evita N+1 al serializar)
+        qs = (
+            Requisition.objects.all()
+            .prefetch_related(
+                "items__description",
+                "items__product",
+                "items__unit",
+            )
+        )
+
         # Any of these flags/roles should grant full visibility
         if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False) \
            or getattr(user, "role", "") in ("admin", "superuser"):
@@ -115,6 +125,22 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         """
         requisition = self.get_object()
 
+        # ✅ NUEVO: Candado imposible por API
+        # No permitir capturar monto real si la requisición no tiene partidas
+        if not requisition.items.exists():
+            return Response(
+                {"detail": "No puedes capturar monto real si la requisición no tiene partidas."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ✅ NUEVO: Candado imposible por API
+        # No permitir capturar monto real si NO confirmó costo aproximado realista
+        if not requisition.ack_cost_realistic:
+            return Response(
+                {"detail": "Debes verificar el costo aproximado pero realista antes de capturar el monto real."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         raw_amount = request.data.get("real_amount", None)
         reason = (request.data.get("reason") or "").strip()
 
@@ -163,7 +189,15 @@ class RequisitionItemViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = RequisitionItem.objects.select_related("requisition")
+
+        # ✅ select_related para evitar N+1 al serializar description_text/display
+        qs = RequisitionItem.objects.select_related(
+            "requisition",
+            "description",
+            "product",
+            "unit",
+        )
+
         if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False) \
            or getattr(user, "role", "") in ("admin", "superuser"):
             return qs

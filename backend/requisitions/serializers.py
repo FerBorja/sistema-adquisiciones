@@ -26,10 +26,20 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
     # ✅ Permitimos id en payload para UPDATE de nested items
     id = serializers.IntegerField(required=False)
 
+    # ✅ NUEVO: texto de descripción y display bonito
+    description_text = serializers.CharField(source="description.text", read_only=True)
+    description_display = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = RequisitionItem
         fields = "__all__"
-        read_only_fields = ["requisition"]  # OJO: NO pongas 'id' aquí
+        # OJO: NO pongas 'id' aquí
+        read_only_fields = ["requisition", "description_text", "description_display"]
+
+    def get_description_display(self, obj):
+        if obj.description_id and getattr(obj, "description", None):
+            return f"{obj.description.text} (ID: {obj.description_id})"
+        return f"ID: {obj.description_id}" if obj.description_id else ""
 
     def validate(self, attrs):
         """

@@ -17,6 +17,9 @@ urlpatterns = [
     path('api/catalogs/', include('catalogs.urls')),
     path('api/reports/', include('reports.urls')),
 
+    # ✅ Alias: /api/item-descriptions/ (compatibilidad opcional)
+    path('api/', include('catalogs.urls_item_descriptions_alias')),
+
     # ✅ Este al final (para no “tragarse” /api/token/)
     path('api/', include('requisitions.urls')),
 ]

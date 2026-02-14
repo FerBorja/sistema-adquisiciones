@@ -53,18 +53,19 @@ export default function RequisitionWizard() {
   // ====== Step 2 shared state ======
   const [items, setItems] = useState([]);
   const [requisitionNumber, setRequisitionNumber] = useState('');
-  const [observaciones, setObservaciones] = useState('');
+  const [observations, setObservations] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // ✅ NUEVO: ACK costo aproximado realista (viene del Step 2)
+  // ✅ ACK costo aproximado realista
   const [ackCostRealistic, setAckCostRealistic] = useState(false);
+  const disableSaveByAck = !ackCostRealistic;
 
   // --- Fetch Departments to resolve requesting_department ID ---
   const [departments, setDepartments] = useState([]);
   useEffect(() => {
     (async () => {
       try {
-        const { data } = await apiClient.get('catalogs/departments/');
+        const { data } = await apiClient.get('/catalogs/departments/');
         setDepartments(data || []);
       } catch (err) {
         console.error('Error loading departments', err);
@@ -77,8 +78,8 @@ export default function RequisitionWizard() {
     const d = departments.find(
       (d) =>
         d.name === formData.department ||
-        formData.department.includes(d.name) ||
-        formData.department.includes?.(d.code)
+        (typeof formData.department === 'string' && formData.department.includes(d.name)) ||
+        (typeof formData.department === 'string' && d.code && formData.department.includes(d.code))
     );
     return d ? d.id : null;
   };
@@ -105,11 +106,10 @@ export default function RequisitionWizard() {
       category_label: '',
       external_service_label: '',
     });
+
     setItems([]);
     setRequisitionNumber('');
-    setObservaciones('');
-
-    // ✅ NUEVO: reset del checkbox
+    setObservations('');
     setAckCostRealistic(false);
   };
 
@@ -131,13 +131,11 @@ export default function RequisitionWizard() {
   const compact = (obj) =>
     Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v !== 'undefined'));
 
-  // Convierte "$ 1,234.50" / "1234.50" / "1,234.50" -> Number
   const parseMoney = (v) => {
     if (v === null || typeof v === 'undefined') return NaN;
     if (typeof v === 'number') return v;
     const s = String(v).trim();
     if (!s) return NaN;
-    // quita $ y espacios, quita comas de miles
     const cleaned = s.replace(/\$/g, '').replace(/\s+/g, '').replace(/,/g, '');
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : NaN;
@@ -147,7 +145,12 @@ export default function RequisitionWizard() {
   const handleFinishFromStep2 = async () => {
     if (saving) return;
 
-    // quick front-end guards
+    // ✅ NUEVO: si no confirma costo, NO se puede guardar
+    if (!ackCostRealistic) {
+      showToast('Debes confirmar "costo aproximado pero realista" para poder guardar.', 'error');
+      return;
+    }
+
     if (!requisitionNumber) {
       showToast('No se pudo asignar número de requisición. Intenta de nuevo.', 'error');
       return;
@@ -157,14 +160,13 @@ export default function RequisitionWizard() {
       return;
     }
 
-    // resolve department FK
     const deptId = findDepartmentId();
     if (!deptId) {
       showToast('No se pudo determinar el Departamento Solicitante.', 'error');
       return;
     }
 
-    // ✅ Validación de estimated_total por renglón (obligatorio y > 0)
+    // ✅ Validación de estimated_total por renglón
     const invalidLines = [];
     const normalizedItems = items.map((it, idx) => {
       const product = Number(it.product);
@@ -172,10 +174,8 @@ export default function RequisitionWizard() {
       const unit = Number(it.unit);
       const description = Number(it.description);
 
-      // A) esperado: viene capturado en UI
       let estimatedTotal = parseMoney(it.estimated_total);
 
-      // B) opcional: si no viene total pero viene unitario, calcula
       if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
         const unitCost = parseMoney(it.estimated_unit_cost);
         if (Number.isFinite(unitCost) && unitCost > 0 && Number.isFinite(quantity) && quantity > 0) {
@@ -211,9 +211,10 @@ export default function RequisitionWizard() {
       return;
     }
 
-    // build payload – omit empty/undefined fields
+    const obs = strOrUndef(observations);
+
     const base = {
-      requesting_department: deptId, // required
+      requesting_department: deptId,
       project: idOrUndef(formData.project),
       funding_source: idOrUndef(formData.funding_source),
       budget_unit: idOrUndef(formData.budget_unit),
@@ -222,10 +223,10 @@ export default function RequisitionWizard() {
       category: idOrUndef(formData.category),
       external_service: idOrUndef(formData.external_service),
       requisition_reason: strOrUndef(formData.description),
-      observations: strOrUndef(observaciones),
+
+      observations: obs,
       items: normalizedItems,
 
-      // ✅ NUEVO: enviar ack_cost_realistic en creación
       ack_cost_realistic: !!ackCostRealistic,
     };
 
@@ -235,9 +236,7 @@ export default function RequisitionWizard() {
       setSaving(true);
       await apiClient.post('requisitions/', payload);
       showToast(
-        `Requisición #${requisitionNumber} creada correctamente.${
-          payload.observations ? ` Observaciones: ${payload.observations}` : ''
-        }`,
+        `Requisición #${requisitionNumber} creada correctamente.${obs ? ` Observaciones: ${obs}` : ''}`,
         'success'
       );
       navigate('/requisitions');
@@ -253,10 +252,6 @@ export default function RequisitionWizard() {
       }
 
       showToast(`Error al crear requisición${detail ? `: ${detail}` : ''}`, 'error');
-
-      console.warn(
-        'If you recently added the "observations" field, make sure migrations ran and the serializer exposes it.'
-      );
     } finally {
       setSaving(false);
     }
@@ -310,24 +305,21 @@ export default function RequisitionWizard() {
             setItems={setItems}
             requisitionNumber={requisitionNumber}
             setRequisitionNumber={setRequisitionNumber}
-
-            // ✅ NUEVO: props para que el checkbox funcione en CREATE
             ackCostRealistic={ackCostRealistic}
             setAckCostRealistic={setAckCostRealistic}
           />
 
-          {/* Observaciones textarea */}
+          {/* Observaciones */}
           <div className="mt-6">
             <label className="block mb-2 font-medium">Observaciones</label>
             <textarea
-              value={observaciones}
-              onChange={(e) => setObservaciones(e.target.value)}
+              value={observations}
+              onChange={(e) => setObservations(e.target.value)}
               placeholder="Escribe observaciones adicionales..."
               className="border p-2 w-full rounded min-h-[100px]"
             />
           </div>
 
-          {/* Bottom buttons */}
           <div className="flex justify-end mt-6 gap-2">
             <button
               type="button"
@@ -337,13 +329,21 @@ export default function RequisitionWizard() {
             >
               Cancelar
             </button>
+
             <button
               type="button"
               onClick={handleFinishFromStep2}
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-60"
-              disabled={saving}
+              className={`bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-60 ${
+                disableSaveByAck ? 'opacity-60' : ''
+              }`}
+              disabled={saving || disableSaveByAck}
+              title={
+                disableSaveByAck
+                  ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
+                  : ''
+              }
             >
-              {saving ? 'Guardando…' : 'Guardar'}
+              {saving ? 'Guardando…' : disableSaveByAck ? 'Guardar (confirma costo)' : 'Guardar'}
             </button>
           </div>
         </>
