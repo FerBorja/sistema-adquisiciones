@@ -212,6 +212,51 @@ function isRealId(v) {
   return Number.isFinite(n) && Number.isInteger(n) && n > 0;
 }
 
+/* ✅ A) helper único: wrapper de guardado con chequeo de duplicados (409) */
+async function saveWithDuplicateCheck({ reqId, payload, method = "put" }) {
+  try {
+    const url = `/requisitions/${reqId}/`;
+    const res =
+      method === "patch"
+        ? await apiClient.patch(url, payload)
+        : await apiClient.put(url, payload);
+
+    return { ok: true, data: res.data };
+  } catch (err) {
+    const httpStatus = err?.response?.status;
+    const data = err?.response?.data;
+
+    if (httpStatus === 409 && Array.isArray(data?.duplicates) && data.duplicates.length > 0) {
+      const lines = data.duplicates.slice(0, 8).map((d) => {
+        const when = d.date ? new Date(d.date).toLocaleString("es-MX") : "";
+        const pct = Number(d.match_ratio ?? 0) * 100;
+        return `• #${d.id} — ${when} — match ${pct.toFixed(0)}% (${d.match_count} item(s))`;
+      });
+
+      const msg =
+        `⚠️ Posible duplicado detectado (ventana ${data.window_days} días).\n\n` +
+        lines.join("\n") +
+        `\n\n¿Quieres ENVIAR / GUARDAR de todos modos?`;
+
+      const userAccepted = window.confirm(msg);
+
+      if (!userAccepted) {
+        return { ok: false, cancelled: true, duplicates: data.duplicates };
+      }
+
+      const forceUrl = `/requisitions/${reqId}/?force_duplicates=1`;
+      const res2 =
+        method === "patch"
+          ? await apiClient.patch(forceUrl, payload)
+          : await apiClient.put(forceUrl, payload);
+
+      return { ok: true, data: res2.data, forced: true, duplicates: data.duplicates };
+    }
+
+    throw err;
+  }
+}
+
 export default function RequisitionEditWizard({ requisition, onSaved }) {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
@@ -438,7 +483,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         description_text: it.description_text || "",
         description_display: it.description_display || "",
         estimated_unit_cost:
-          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined" ? "" : Number(it.estimated_unit_cost),
+          it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
+            ? ""
+            : Number(it.estimated_unit_cost),
         estimated_total:
           it.estimated_total === null || typeof it.estimated_total === "undefined" ? "" : Number(it.estimated_total),
       }))
@@ -574,7 +621,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     let cancelled = false;
     async function prefetch() {
       try {
-        const results = await Promise.allSettled(missing.map((pid) => apiClient.get(STEP2_SPECS.itemDescriptionsUrl(pid))));
+        const results = await Promise.allSettled(
+          missing.map((pid) => apiClient.get(STEP2_SPECS.itemDescriptionsUrl(pid)))
+        );
         if (cancelled) return;
 
         const patch = {};
@@ -931,7 +980,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   };
 
   /* ─────────────────────────── SAVE (PUT) ────────────────────────────────── */
-  const doSaveAll = async ({ silent = false, bypassRealAmountBlock = false } = {}) => {
+  const doSaveAll = async ({ silent = false, bypassRealAmountBlock = false, overrideStatus = null } = {}) => {
     if (!ackCostRealistic) {
       if (!silent) alert('Debes confirmar "costo aproximado pero realista" para poder guardar.');
       throw new Error("Blocked: ack cost realistic required");
@@ -945,6 +994,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       }
       throw new Error("Blocked: real amount required");
     }
+
+    const finalStatus = overrideStatus ?? headerForm.status;
 
     const payload = {
       requesting_department: numOrNull(headerForm.requesting_department),
@@ -961,14 +1012,23 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
       ack_cost_realistic: ackCostRealistic,
 
-      status: headerForm.status,
+      status: finalStatus,
     };
 
-    const resp = await apiClient.put(`/requisitions/${requisition.id}/`, payload);
+    const result = await saveWithDuplicateCheck({
+      reqId: requisition.id,
+      payload,
+      method: "put",
+    });
 
-    // ✅ REHIDRATACIÓN
-    const updated = resp.data;
+    if (!result.ok && result.cancelled) {
+      if (!silent) alert("Envío/guardado cancelado: revisa datos para evitar duplicado.");
+      throw new Error("Blocked: duplicate cancelled");
+    }
 
+    const updated = result.data;
+
+    // ✅ REHIDRATACIÓN (igual que tu lógica)
     try {
       setHeaderForm((prev) => ({
         ...prev,
@@ -986,7 +1046,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       setObservations(updated.observations || "");
       setAckCostRealistic(Boolean(updated.ack_cost_realistic));
 
-      // si el backend regresa items aquí, rehidrata (si no, no pasa nada)
       if (Array.isArray(updated.items)) {
         setItems(
           (updated.items || []).map((it) => ({
@@ -1016,7 +1075,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     onSaved?.(updated);
     setHasUnsavedChanges(false);
 
-    if (!silent) alert(`Requisición #${requisition.id} guardada correctamente.`);
+    if (!silent) {
+      const extra = result.forced ? "\n\n(Confirmaste un posible duplicado.)" : "";
+      alert(`Requisición #${requisition.id} guardada correctamente.${extra}`);
+    }
+
     return updated;
   };
 
@@ -1032,6 +1095,31 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       const data = err?.response?.data;
       if (data) alert(`No se pudo guardar.\n\n${JSON.stringify(data, null, 2)}`);
       else alert("No se pudo guardar. Revisa los datos.");
+    } finally {
+      setBusySave(false);
+    }
+  };
+
+  // ✅ C) handler para enviar ahora (status="sent") usando el wrapper 409
+  const sendNow = async () => {
+    if (items.length === 0) {
+      alert("No puedes enviar una requisición sin partidas.");
+      return;
+    }
+
+    if (!window.confirm("¿Enviar esta requisición a Unidad Central?")) return;
+
+    setBusySave(true);
+    try {
+      await doSaveAll({ silent: false, overrideStatus: "sent" });
+    } catch (err) {
+      const msg = String(err?.message || "");
+      if (msg.includes("Blocked:")) return;
+
+      console.error(err);
+      const data = err?.response?.data;
+      if (data) alert(`No se pudo enviar.\n\n${JSON.stringify(data, null, 2)}`);
+      else alert("No se pudo enviar. Revisa los datos.");
     } finally {
       setBusySave(false);
     }
@@ -1221,7 +1309,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <strong>Monto real</strong>: {fmtMoney(requisition.real_amount)}
                 </div>
                 <div className="text-[11px] text-gray-500 mt-1">
-                  {loadingMe ? "Verificando permisos..." : adminLike ? "Admins pueden capturarlo en Paso 2." : "Solo admins pueden capturarlo."}
+                  {loadingMe
+                    ? "Verificando permisos..."
+                    : adminLike
+                      ? "Admins pueden capturarlo en Paso 2."
+                      : "Solo admins pueden capturarlo."}
                 </div>
               </div>
             </div>
@@ -1521,7 +1613,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               </div>
 
               {/* ✅ Panel de Cotizaciones (PDF) */}
-              <RequisitionQuotesPanel requisitionId={requisition.id} items={items} onDraftInvalidChange={setQuoteDraftInvalid} />
+              <RequisitionQuotesPanel
+                requisitionId={requisition.id}
+                items={items}
+                onDraftInvalidChange={setQuoteDraftInvalid}
+              />
 
               {/* ✅ Checkbox ack_cost_realistic */}
               <div className="mt-6 border rounded p-3 bg-gray-50">
@@ -1677,7 +1773,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 />
               </div>
 
-              {/* Footer actions */}
+              {/* ✅ Footer actions (Enviar + Guardar) */}
               <div className="mt-6 flex items-center justify-between">
                 <div className="flex gap-2">
                   <button type="button" onClick={goPrev} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">
@@ -1695,23 +1791,47 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={busySave || disableSave || disableSaveByAck}
-                  onClick={saveAll}
-                  className={`px-4 py-2 rounded text-white ${
-                    busySave || disableSave || disableSaveByAck ? "bg-green-400" : "bg-green-600 hover:bg-green-700"
-                  }`}
-                  title={
-                    disableSaveByAck
-                      ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
-                      : disableSave
-                        ? "Debes capturar el monto real antes de guardar cambios."
-                        : ""
-                  }
-                >
-                  {busySave ? "Guardando..." : disableSaveByAck ? "Guardar (confirma costo)" : disableSave ? "Guardar (bloqueado)" : "Guardar"}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={busySave || disableSave || disableSaveByAck || items.length === 0}
+                    onClick={sendNow}
+                    className={`px-4 py-2 rounded text-white ${
+                      busySave || disableSave || disableSaveByAck || items.length === 0
+                        ? "bg-indigo-400"
+                        : "bg-indigo-600 hover:bg-indigo-700"
+                    }`}
+                    title={
+                      items.length === 0
+                        ? "Primero registra al menos una partida."
+                        : disableSaveByAck
+                          ? 'Debes confirmar "costo aproximado pero realista" para poder enviar.'
+                          : disableSave
+                            ? "Debes capturar el monto real antes de enviar."
+                            : ""
+                    }
+                  >
+                    {busySave ? "Enviando..." : "Enviar"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busySave || disableSave || disableSaveByAck}
+                    onClick={saveAll}
+                    className={`px-4 py-2 rounded text-white ${
+                      busySave || disableSave || disableSaveByAck ? "bg-green-400" : "bg-green-600 hover:bg-green-700"
+                    }`}
+                    title={
+                      disableSaveByAck
+                        ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
+                        : disableSave
+                          ? "Debes capturar el monto real antes de guardar cambios."
+                          : ""
+                    }
+                  >
+                    {busySave ? "Guardando..." : "Guardar"}
+                  </button>
+                </div>
               </div>
             </>
           )}
@@ -1766,7 +1886,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             </div>
 
             <div className="flex justify-end">
-              <button type="button" className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={() => setShowCatalogModal(false)}>
+              <button
+                type="button"
+                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
+                onClick={() => setShowCatalogModal(false)}
+              >
                 Cerrar
               </button>
             </div>
@@ -1818,7 +1942,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             </div>
 
             <div className="flex justify-end gap-2">
-              <button type="button" className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={() => setShowRegisterModal(false)}>
+              <button
+                type="button"
+                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300"
+                onClick={() => setShowRegisterModal(false)}
+              >
                 Cancelar
               </button>
               <button

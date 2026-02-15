@@ -4,6 +4,8 @@ from decimal import Decimal, InvalidOperation
 from io import BytesIO
 import json
 import re
+from datetime import timedelta
+import unicodedata
 
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -13,8 +15,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
 
-from django.db.models import Count  # ✅ contar items
+from django.db.models import Count, Prefetch  # ✅ contar items + prefetch
 from django.shortcuts import get_object_or_404  # ✅ NUEVO
+from django.utils import timezone
 
 from .models import (
     Requisition, RequisitionItem, RequisitionRealAmountLog,
@@ -27,6 +30,277 @@ from .serializers import (
 from .pdf_generator import generate_requisition_pdf
 
 import traceback
+
+
+# =============================================================================
+# ✅ Duplicados: configuración
+# =============================================================================
+DUPLICATE_WINDOW_DAYS_DEFAULT = 30
+DUPLICATE_MAX_RESULTS = 10
+DUPLICATE_MIN_MATCH_RATIO = 0.5  # tu criterio aceptado ✅
+
+# ✅ Ahora también corre en "registered" (guardar/crear), no solo en "sent"
+DUPLICATE_GUARD_TARGET_STATUSES = {"sent", "registered"}
+
+
+def _is_admin_like_user(user) -> bool:
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    role = getattr(user, "role", "") or ""
+    role = str(role).lower()
+    return bool(
+        getattr(user, "is_superuser", False)
+        or getattr(user, "is_staff", False)
+        or role in ("admin", "superuser")
+    )
+
+
+def _should_force_duplicates(request) -> bool:
+    v = request.query_params.get("force_duplicates")
+    if v is None:
+        v = request.headers.get("X-Force-Duplicates")
+    return str(v).lower() in ("1", "true", "yes", "y")
+
+
+def _norm_text(s: str) -> str:
+    if not s:
+        return ""
+    s = str(s).strip().lower()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"[^a-z0-9\s]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _extract_pk(value):
+    """Acepta int, str-int, o instancia modelo (FK)."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return getattr(value, "pk", None)
+
+
+HEADER_ID_FIELDS = [
+    "requesting_department_id",
+    "project_id",
+    "funding_source_id",
+    "budget_unit_id",
+    "agreement_id",
+    "category_id",
+    "tender_id",
+    "external_service_id",
+]
+
+
+def _get_header_ids_from_instance_and_vd(instance: Requisition, vd: dict) -> dict:
+    """
+    Calcula los IDs finales del header que quedarán guardados (vd si viene, si no instance).
+    """
+    out = {}
+    for field_id in HEADER_ID_FIELDS:
+        field = field_id.replace("_id", "")
+        if field in vd:
+            out[field_id] = _extract_pk(vd.get(field))
+        else:
+            out[field_id] = getattr(instance, field_id, None)
+    return out
+
+
+def _get_header_ids_from_vd_only(vd: dict) -> dict:
+    out = {}
+    for field_id in HEADER_ID_FIELDS:
+        field = field_id.replace("_id", "")
+        out[field_id] = _extract_pk(vd.get(field))
+    return out
+
+
+def _item_signature(item: RequisitionItem) -> str:
+    """
+    Firma del “artículo” para duplicados:
+      - product_id + description_id (lo más exacto para tu sistema)
+      - fallback a texto si existiera description_text (por si un día cambias serializer)
+    """
+    pid = getattr(item, "product_id", None)
+    did = getattr(item, "description_id", None)
+    if pid and did:
+        return f"p:{pid}|d:{did}"
+    if pid:
+        return f"p:{pid}"
+    desc_txt = getattr(item, "description_text", "") or getattr(item, "description_display", "")
+    desc_norm = _norm_text(desc_txt)
+    return f"t:{desc_norm}" if desc_norm else "unknown"
+
+
+def _build_item_sig_set(items_qs) -> set:
+    return {_item_signature(it) for it in items_qs}
+
+
+def _filter_qs_by_header_ids(qs, header_ids: dict):
+    """
+    Aplica filtros exactos de header:
+    si el valor es None => exige isnull
+    si tiene valor => exige igualdad
+    """
+    for fid in HEADER_ID_FIELDS:
+        field = fid.replace("_id", "")
+        v = header_ids.get(fid, None)
+        if v is None:
+            qs = qs.filter(**{f"{field}__isnull": True})
+        else:
+            qs = qs.filter(**{fid: v})
+    return qs
+
+
+def _find_header_only_duplicates(
+    *,
+    request,
+    current_req_id,
+    header_ids: dict,
+    reason_norm: str,
+    window_days: int,
+):
+    """
+    Duplicado header-only: mismo header + mismo motivo (normalizado).
+    Útil en CREATE cuando aún no hay items.
+    """
+    now = timezone.now()
+    start = now - timedelta(days=window_days)
+
+    qs = Requisition.objects.all()
+    qs = qs.filter(created_at__gte=start).exclude(status="cancelled")
+
+    if current_req_id:
+        qs = qs.exclude(pk=current_req_id)
+
+    if not _is_admin_like_user(getattr(request, "user", None)):
+        qs = qs.filter(user=request.user)
+
+    qs = _filter_qs_by_header_ids(qs, header_ids)
+
+    results = []
+    for cand in qs.order_by("-created_at")[:200]:
+        cand_reason_norm = _norm_text(getattr(cand, "requisition_reason", "") or "")
+        if cand_reason_norm != reason_norm:
+            continue
+
+        results.append(
+            {
+                "id": cand.pk,
+                "status": getattr(cand, "status", None),
+                "date": cand.created_at.isoformat() if getattr(cand, "created_at", None) else None,
+                "match_count": 0,
+                "match_ratio": 1.0,
+                "matching_signatures": [],
+            }
+        )
+
+    return results[:DUPLICATE_MAX_RESULTS]
+
+
+def _find_possible_duplicates(
+    *,
+    request,
+    current_req_id,
+    header_ids: dict,
+    item_sigs: set,
+    reason_norm: str,
+    window_days: int,
+):
+    """
+    Detección de duplicados:
+      - header EXACTO (mismos FKs del encabezado)
+      - ventana de tiempo sobre created_at
+      - motivo normalizado igual
+      - intersección fuerte de firmas de items
+    Seguridad:
+      - si NO admin-like, solo busca dentro de requisiciones del mismo user
+        (evita filtrar/leakear existencia de requisiciones ajenas).
+    """
+    if not item_sigs:
+        # si no hay items, cae al detector header-only (para CREATE o casos raros)
+        return _find_header_only_duplicates(
+            request=request,
+            current_req_id=current_req_id,
+            header_ids=header_ids,
+            reason_norm=reason_norm,
+            window_days=window_days,
+        )
+
+    now = timezone.now()
+    start = now - timedelta(days=window_days)
+
+    qs = Requisition.objects.all()
+    qs = qs.filter(created_at__gte=start).exclude(status="cancelled")
+
+    if current_req_id:
+        qs = qs.exclude(pk=current_req_id)
+
+    if not _is_admin_like_user(getattr(request, "user", None)):
+        qs = qs.filter(user=request.user)
+
+    qs = _filter_qs_by_header_ids(qs, header_ids)
+
+    # Prefetch ultra-ligero de items
+    qs = qs.prefetch_related(
+        Prefetch(
+            "items",
+            queryset=RequisitionItem.objects.only("id", "requisition_id", "product_id", "description_id"),
+        )
+    )
+
+    results = []
+    for cand in qs.order_by("-created_at")[:200]:
+        cand_reason_norm = _norm_text(getattr(cand, "requisition_reason", "") or "")
+        if cand_reason_norm != reason_norm:
+            continue
+
+        cand_sigs = _build_item_sig_set(cand.items.all())
+        if not cand_sigs:
+            continue
+
+        intersection = item_sigs.intersection(cand_sigs)
+        if not intersection:
+            continue
+
+        match_count = len(intersection)
+        match_ratio = match_count / max(len(item_sigs), 1)
+
+        if match_ratio >= DUPLICATE_MIN_MATCH_RATIO or (len(item_sigs) == 1 and match_count == 1):
+            results.append(
+                {
+                    "id": cand.pk,
+                    "status": getattr(cand, "status", None),
+                    "date": cand.created_at.isoformat() if getattr(cand, "created_at", None) else None,
+                    "match_count": match_count,
+                    "match_ratio": round(match_ratio, 3),
+                    "matching_signatures": list(sorted(intersection))[:12],
+                }
+            )
+
+    results.sort(key=lambda x: (x["match_ratio"], x["match_count"]), reverse=True)
+    return results[:DUPLICATE_MAX_RESULTS]
+
+
+def _should_run_duplicate_guard(*, instance: Requisition, validated_data: dict) -> bool:
+    """
+    ✅ NUEVA REGLA:
+      - Si el status final es 'registered' => SIEMPRE corre (guardar/crear)
+      - Si el status final es 'sent' => corre solo en transición (registered -> sent), para no fastidiar después
+    """
+    old_status = str(getattr(instance, "status", "") or "").strip().lower()
+    new_status = str(validated_data.get("status", old_status) or "").strip().lower()
+
+    if new_status == "registered":
+        return True
+
+    if new_status in DUPLICATE_GUARD_TARGET_STATUSES and old_status != new_status:
+        return True
+
+    return False
 
 
 def _merge_pdf_bytes(main_pdf_bytes: bytes, extra_pdf_paths: list[str]) -> bytes:
@@ -46,12 +320,10 @@ def _merge_pdf_bytes(main_pdf_bytes: bytes, extra_pdf_paths: list[str]) -> bytes
 
     writer = PdfWriter()
 
-    # 1) principal
     main_reader = PdfReader(BytesIO(main_pdf_bytes))
     for page in main_reader.pages:
         writer.add_page(page)
 
-    # 2) anexos (cotizaciones)
     failures = []
     for path in extra_pdf_paths:
         try:
@@ -75,18 +347,10 @@ def _merge_pdf_bytes(main_pdf_bytes: bytes, extra_pdf_paths: list[str]) -> bytes
 # =============================================================================
 
 def _explode_ids_string(s: str) -> list[str]:
-    """
-    Convierte un string a tokens de IDs:
-      - "69,70" -> ["69","70"]
-      - "69 70" -> ["69","70"]
-      - "[69,70]" -> ["69","70"] (vía json)
-      - '["69","70"]' -> ["69","70"] (vía json)
-    """
     s = (s or "").strip()
     if not s:
         return []
 
-    # Intentar JSON primero si parece lista/valor JSON
     if (s.startswith("[") and s.endswith("]")) or (s.startswith('"[') and s.endswith(']"')):
         try:
             parsed = json.loads(s)
@@ -100,30 +364,18 @@ def _explode_ids_string(s: str) -> list[str]:
             if isinstance(parsed, (int, float, str)):
                 return _explode_ids_string(str(parsed))
         except Exception:
-            # si falla JSON, caemos a split por separadores
             pass
 
-    # Split por comas/espacios
     parts = re.split(r"[\s,]+", s)
     return [p for p in (x.strip() for x in parts) if p]
 
 
 def _parse_item_ids_tolerant(raw_ids) -> list[int]:
-    """
-    Acepta:
-      - ["69","70"] (ideal)
-      - ["69,70"] (bug común)
-      - "69,70"
-      - "[69,70]" / '["69","70"]'
-      - 69
-    Retorna lista de ints únicos (preserva orden).
-    """
     tokens: list[str] = []
 
     if raw_ids is None:
         tokens = []
     elif isinstance(raw_ids, (list, tuple)):
-        # puede llegar ["69","70"] o ["69,70"] o mezcla
         for v in raw_ids:
             if v is None:
                 continue
@@ -131,7 +383,6 @@ def _parse_item_ids_tolerant(raw_ids) -> list[int]:
     else:
         tokens = _explode_ids_string(str(raw_ids))
 
-    # Convertir a int + validar
     out: list[int] = []
     seen = set()
 
@@ -158,21 +409,8 @@ class StandardResultsSetPagination(PageNumberPagination):
 
 
 class IsAdminLike(permissions.BasePermission):
-    """
-    Admin “real” para este proyecto:
-    - superuser
-    - staff
-    - role admin/superuser (si tu User tiene role)
-    """
     def has_permission(self, request, view):
-        user = getattr(request, "user", None)
-        if not user or not getattr(user, "is_authenticated", False):
-            return False
-        return bool(
-            getattr(user, "is_superuser", False)
-            or getattr(user, "is_staff", False)
-            or getattr(user, "role", "") in ("admin", "superuser")
-        )
+        return _is_admin_like_user(getattr(request, "user", None))
 
 
 class RequisitionViewSet(viewsets.ModelViewSet):
@@ -198,11 +436,7 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             .annotate(item_count=Count("items", distinct=True))
         )
 
-        is_admin_like = bool(
-            getattr(user, "is_superuser", False)
-            or getattr(user, "is_staff", False)
-            or getattr(user, "role", "") in ("admin", "superuser")
-        )
+        is_admin_like = _is_admin_like_user(user)
 
         if not is_admin_like:
             qs = qs.filter(user=user)
@@ -217,11 +451,163 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         serializer.save(user=self.request.user)
 
     # =========================================================================
+    # ✅ DUPLICADOS: ahora también en CREATE (POST /requisitions/)
+    # =========================================================================
+    def create(self, request, *args, **kwargs):
+        ser = self.get_serializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        vd = ser.validated_data
+
+        # status final (si no viene, normalmente tu modelo default es registered)
+        status_in = vd.get("status", None)
+        new_status = str(status_in or "registered").strip().lower()
+
+        if new_status in DUPLICATE_GUARD_TARGET_STATUSES and not _should_force_duplicates(request):
+            header_ids = _get_header_ids_from_vd_only(vd)
+            reason_norm = _norm_text(vd.get("requisition_reason", "") or "")
+
+            # En CREATE normalmente aún no hay items persistidos.
+            # Si en algún flujo mandaras items anidados, aquí podrías construir firmas desde request.data,
+            # pero en tu sistema los items se crean por endpoints /items/, así que hacemos fallback header-only.
+            item_sigs = set()
+
+            try:
+                days = int(request.query_params.get("dup_days", DUPLICATE_WINDOW_DAYS_DEFAULT))
+            except ValueError:
+                days = DUPLICATE_WINDOW_DAYS_DEFAULT
+            days = max(1, min(days, 365))
+
+            duplicates = _find_possible_duplicates(
+                request=request,
+                current_req_id=None,
+                header_ids=header_ids,
+                item_sigs=item_sigs,
+                reason_norm=reason_norm,
+                window_days=days,
+            )
+
+            if duplicates:
+                return Response(
+                    {
+                        "detail": "Posible requisición duplicada detectada.",
+                        "window_days": days,
+                        "criteria": {
+                            **header_ids,
+                            "items_count": 0,
+                            "min_match_ratio": DUPLICATE_MIN_MATCH_RATIO,
+                        },
+                        "duplicates": duplicates,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        self.perform_create(ser)
+        headers = self.get_success_headers(ser.data)
+        return Response(ser.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    # =========================================================================
+    # ✅ DUPLICADOS: bloqueo 409 al guardar en REGISTERED y al enviar a SENT
+    # =========================================================================
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+
+        ser = self.get_serializer(instance, data=request.data, partial=partial)
+        ser.is_valid(raise_exception=True)
+        vd = ser.validated_data
+
+        should_guard = _should_run_duplicate_guard(instance=instance, validated_data=vd)
+
+        if should_guard and not _should_force_duplicates(request):
+            header_ids = _get_header_ids_from_instance_and_vd(instance, vd)
+            reason_norm = _norm_text(vd.get("requisition_reason", getattr(instance, "requisition_reason", "") or "") or "")
+
+            # items ya están persistidos por tu flujo anidado
+            items_qs = RequisitionItem.objects.filter(requisition=instance).only(
+                "id", "requisition_id", "product_id", "description_id"
+            )
+            item_sigs = _build_item_sig_set(items_qs)
+
+            try:
+                days = int(request.query_params.get("dup_days", DUPLICATE_WINDOW_DAYS_DEFAULT))
+            except ValueError:
+                days = DUPLICATE_WINDOW_DAYS_DEFAULT
+            days = max(1, min(days, 365))
+
+            duplicates = _find_possible_duplicates(
+                request=request,
+                current_req_id=instance.pk,
+                header_ids=header_ids,
+                item_sigs=item_sigs,
+                reason_norm=reason_norm,
+                window_days=days,
+            )
+
+            if duplicates:
+                return Response(
+                    {
+                        "detail": "Posible requisición duplicada detectada.",
+                        "window_days": days,
+                        "criteria": {
+                            **header_ids,
+                            "items_count": len(item_sigs),
+                            "min_match_ratio": DUPLICATE_MIN_MATCH_RATIO,
+                        },
+                        "duplicates": duplicates,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+        self.perform_update(ser)
+        return Response(ser.data)
+
+    @action(detail=True, methods=["get"], url_path="check_duplicates")
+    def check_duplicates(self, request, pk=None):
+        """
+        Debug / verificación manual:
+        GET /api/requisitions/{id}/check_duplicates/?dup_days=30
+        """
+        instance = self.get_object()
+
+        items_qs = RequisitionItem.objects.filter(requisition=instance).only(
+            "id", "requisition_id", "product_id", "description_id"
+        )
+        item_sigs = _build_item_sig_set(items_qs)
+
+        try:
+            days = int(request.query_params.get("dup_days", DUPLICATE_WINDOW_DAYS_DEFAULT))
+        except ValueError:
+            days = DUPLICATE_WINDOW_DAYS_DEFAULT
+        days = max(1, min(days, 365))
+
+        header_ids = {fid: getattr(instance, fid, None) for fid in HEADER_ID_FIELDS}
+        reason_norm = _norm_text(getattr(instance, "requisition_reason", "") or "")
+
+        duplicates = _find_possible_duplicates(
+            request=request,
+            current_req_id=instance.pk,
+            header_ids=header_ids,
+            item_sigs=item_sigs,
+            reason_norm=reason_norm,
+            window_days=days,
+        )
+
+        return Response(
+            {
+                "has_duplicates": bool(duplicates),
+                "window_days": days,
+                "criteria": {
+                    **header_ids,
+                    "items_count": len(item_sigs),
+                    "min_match_ratio": DUPLICATE_MIN_MATCH_RATIO,
+                },
+                "duplicates": duplicates,
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # =========================================================================
     # ✅ NUEVO: Items anidados (GET/POST/PATCH/DELETE)
-    #   POST   /api/requisitions/{id}/items/               -> crea 1 item y regresa el item con id
-    #   GET    /api/requisitions/{id}/items/               -> lista items de la requisición
-    #   PATCH  /api/requisitions/{id}/items/{item_id}/     -> edita 1 item
-    #   DELETE /api/requisitions/{id}/items/{item_id}/     -> borra 1 item
     # =========================================================================
 
     @action(
@@ -244,11 +630,9 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             ser = RequisitionItemSerializer(qs, many=True)
             return Response(ser.data, status=status.HTTP_200_OK)
 
-        # POST: crear 1 item
         ser = RequisitionItemSerializer(data=request.data, context={"request": request})
         ser.is_valid(raise_exception=True)
 
-        # Fuerza requisition del parent (evita colisiones)
         item = ser.save(requisition=requisition)
 
         out = RequisitionItemSerializer(item).data
@@ -272,7 +656,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         item = get_object_or_404(requisition.items, id=item_id)
 
         if request.method == "DELETE":
-            # No permitir borrar si ya está cotizado
             if RequisitionQuoteItem.objects.filter(requisition_item=item).exists():
                 return Response(
                     {"detail": "No puedes eliminar una partida que ya tiene cotización. Elimina la cotización primero."},
@@ -282,7 +665,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             item.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        # PATCH
         ser = RequisitionItemSerializer(item, data=request.data, partial=True, context={"request": request})
         ser.is_valid(raise_exception=True)
         ser.save(requisition=requisition)
@@ -295,7 +677,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     def export_pdf(self, request, pk=None):
         requisition = self.get_object()
 
-        # ✅ Candados antes de imprimir/exportar
         if requisition.status == "cancelled":
             return Response(
                 {"detail": "No se puede imprimir una requisición cancelada."},
@@ -329,7 +710,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         try:
             buf = generate_requisition_pdf(requisition)
 
-            # ✅ anexar cotizaciones (PDFs) al final
             quote_paths = []
             for q in requisition.quotes.order_by("uploaded_at"):
                 try:
@@ -352,10 +732,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[IsAdminLike])
     def set_real_amount(self, request, pk=None):
-        """
-        ✅ Admin-only
-        Captura/actualiza monto real TOTAL de requisición y deja auditoría (quién/cuándo/por qué).
-        """
         requisition = self.get_object()
 
         if not requisition.items.exists():
@@ -427,7 +803,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             ser = RequisitionQuoteSerializer(qs, many=True)
             return Response(ser.data, status=status.HTTP_200_OK)
 
-        # POST upload
         if not requisition.items.exists():
             return Response(
                 {"detail": "No puedes subir cotizaciones si la requisición no tiene partidas."},
@@ -442,7 +817,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         if not name.endswith(".pdf"):
             return Response({"file": "Solo se permiten archivos .pdf"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # header %PDF
         try:
             head = file_obj.read(4)
             file_obj.seek(0)
@@ -454,13 +828,9 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         if getattr(file_obj, "size", 0) > 50 * 1024 * 1024:
             return Response({"file": "El archivo excede 50 MB."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ---------------------------------------------------------------------
-        # ✅ Parche tolerante para item_ids
-        # ---------------------------------------------------------------------
         if hasattr(request.data, "getlist"):
             raw_ids = request.data.getlist("item_ids") or request.data.getlist("item_ids[]")
             if not raw_ids:
-                # fallback por si viene como un solo string
                 raw_ids = request.data.get("item_ids") or request.data.get("item_ids[]") or []
         else:
             raw_ids = request.data.get("item_ids") or request.data.get("item_ids[]") or []
@@ -539,7 +909,6 @@ class RequisitionItemViewSet(viewsets.ModelViewSet):
             "unit",
         )
 
-        if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False) \
-           or getattr(user, "role", "") in ("admin", "superuser"):
+        if _is_admin_like_user(user):
             return qs
         return qs.filter(requisition__user=user)
