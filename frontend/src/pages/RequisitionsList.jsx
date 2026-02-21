@@ -118,8 +118,17 @@ export default function RequisitionsList() {
   const [requisitions, setRequisitions] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const userRole = user?.role?.toLowerCase() || '';
-  const canModify = userRole === 'admin' || userRole === 'superuser';
+  // ---- Rol del usuario (tolerante a ES/EN y mayúsculas) ----
+  const roleRaw = (user?.role ?? '').toString().trim().toLowerCase();
+  const isAdmin = roleRaw === 'admin' || roleRaw === 'administrador';
+  const isSuperuser = roleRaw === 'superuser' || roleRaw === 'superusuario';
+
+  // Admin/Superuser sí pueden modificar (como ya lo tenías)
+  const canModify = isAdmin || isSuperuser;
+
+  // La nota SOLO debe mostrarse al rol Usuario (o 'user' si viene en inglés)
+  const showImmutableNote = roleRaw === 'usuario' || roleRaw === 'user';
+
   const userName = `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim();
 
   // ---- Helpers para búsqueda (tolerante a acentos / mayúsculas / fechas) ----
@@ -284,12 +293,16 @@ export default function RequisitionsList() {
       <h1 className="text-xl font-semibold mb-2">
         Favor de imprimir, firmar y entregar su requisición en Fecha y Hora establecidas en Secretaría Administrativa
       </h1>
+
       <p className="mb-2">
         Listado de Requisición del Usuario : <span className="font-bold">{userName}</span>
       </p>
-      <p className="text-red-600 font-bold mb-4">
-        * Nota: Las solicitudes una vez autorizadas no pueden ser modificadas por el usuario.
-      </p>
+
+      {showImmutableNote && (
+        <p className="text-red-600 font-bold mb-4">
+          * Nota: Las solicitudes una vez creadas no pueden ser modificadas por el usuario.
+        </p>
+      )}
 
       {/* Buscador */}
       <div className="flex items-center gap-3 my-3">
