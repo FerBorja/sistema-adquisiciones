@@ -51,13 +51,6 @@ class Agreement(models.Model):
         return f"{self.code} – {self.description}"
 
 
-class Category(models.Model):
-    name = models.CharField(max_length=100)
-
-    def __str__(self):
-        return self.name
-
-
 class Tender(models.Model):
     name = models.CharField(max_length=100)
 
@@ -144,7 +137,6 @@ class Requisition(models.Model):
     funding_source = models.ForeignKey(FundingSource, on_delete=models.PROTECT)
     budget_unit = models.ForeignKey(BudgetUnit, on_delete=models.PROTECT)
     agreement = models.ForeignKey(Agreement, on_delete=models.PROTECT)
-    category = models.ForeignKey(Category, on_delete=models.PROTECT)
     external_service = models.ForeignKey(ExternalService, on_delete=models.PROTECT)
     tender = models.ForeignKey(Tender, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)

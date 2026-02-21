@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from requisitions.models import (
     Department, Project, FundingSource, BudgetUnit,
-    Agreement, Category, Tender, ExternalService,
+    Agreement, Tender, ExternalService,
     UnitOfMeasurement, Product, ItemDescription
 )
 
@@ -33,12 +33,6 @@ class BudgetUnitSerializer(serializers.ModelSerializer):
 class AgreementSerializer(serializers.ModelSerializer):
     class Meta:
         model = Agreement
-        fields = '__all__'
-
-
-class CategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Category
         fields = '__all__'
 
 

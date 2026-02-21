@@ -274,8 +274,6 @@ def generate_requisition_pdf(requisition):
                            ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     agreement = _as_text(_get(requisition, 'agreement'),
                          ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
-    category = _as_text(_get(requisition, 'category'),
-                        ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     tender = _as_text(_get(requisition, 'tender'),
                       ['code', 'clave', 'codigo', 'name', 'nombre', 'description', 'descripcion', 'label'])
     external_service = _as_text(_get(requisition, 'external_service'),
@@ -290,7 +288,6 @@ def generate_requisition_pdf(requisition):
         ("Fuente de Financiamiento", funding_source or '—'),
         ("Unidad Presupuestal", budget_unit or '—'),
         ("Convenios", agreement or '—'),
-        ("Categoría", category or '—'),
         ("Fecha de Creación", created_at or '—'),
         ("Motivos de Requisición", requisition_reason or '—'),
         ("Servicio Externo / Académico", external_service or '—'),
@@ -380,7 +377,6 @@ def generate_requisition_pdf(requisition):
     ])
 
     # Column widths (must add up to doc.width)
-    # doc.width = page_w - left_margin - right_margin = 512 on letter with margins 50/50
     col0 = 140  # Objeto del gasto
     col1 = 45   # Cantidad
     col2 = 55   # Unidad
@@ -402,7 +398,6 @@ def generate_requisition_pdf(requisition):
 
         ('VALIGN', (0, 1), (-1, -1), 'TOP'),
 
-        # alignment
         ('ALIGN', (1, 1), (2, -2), 'CENTER'),   # Cantidad + Unidad (body rows)
         ('ALIGN', (4, 1), (5, -1), 'RIGHT'),    # montos
         ('ALIGN', (0, 1), (0, -1), 'LEFT'),
@@ -412,7 +407,6 @@ def generate_requisition_pdf(requisition):
         ('RIGHTPADDING', (0, 0), (-1, -1), 4),
         ('GRID', (0, 0), (-1, -1), 1, colors.black),
 
-        # TOTAL row style (last row)
         ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ('BACKGROUND', (0, -1), (-1, -1), colors.whitesmoke),
     ]))
@@ -420,7 +414,6 @@ def generate_requisition_pdf(requisition):
     story.append(items_table)
     story.append(Spacer(1, 8))
 
-    # Total general (opcional bonito)
     story.append(Paragraph(f"<b>Total requisición:</b> {money_mxn(grand_total)}", normal))
     story.append(Spacer(1, 12))
 
@@ -430,7 +423,6 @@ def generate_requisition_pdf(requisition):
     if obs_text:
         obs_title = Paragraph("<b>Observaciones:</b>", normal)
         obs_par = Paragraph(_escape(obs_text), normal)
-        # Prefer keep-together, but fall back if too long
         try:
             story.append(KeepTogether([obs_title, Spacer(1, 4), obs_par, Spacer(1, 12)]))
         except Exception:
@@ -461,13 +453,11 @@ def generate_requisition_pdf(requisition):
         ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
     ]))
 
-    # Keep signatures together; if it doesn't fit, it will move to next page intact
     try:
         story.append(KeepTogether([Spacer(1, 8), sign_table]))
     except Exception:
         story.extend([Spacer(1, 8), sign_table])
 
-    # Build the document (header/footer drawn on each page)
     doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
 
     buffer.seek(0)

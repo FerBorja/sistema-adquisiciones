@@ -23,7 +23,6 @@ const CATALOG_CANDIDATES = {
   funding_source: ["/catalogs/funding-sources/", "/catalogs/funding_sources/", "/catalogs/funding/"],
   budget_unit: ["/catalogs/budget-units/", "/catalogs/budget_units/"],
   agreement: ["/catalogs/agreements/"],
-  category: ["/catalogs/categories/"],
   tender: ["/catalogs/tenders/"],
   external_service: ["/catalogs/external-services/", "/catalogs/external_services/", "/catalogs/services/"],
 };
@@ -34,7 +33,6 @@ const CATALOG_META = {
   funding_source: { uiLabel: "Fuente de Financiamiento" },
   budget_unit: { uiLabel: "Unidad Presupuestal" },
   agreement: { uiLabel: "Convenios" },
-  category: { uiLabel: "Categoría" },
   tender: { uiLabel: "Licitación" },
   external_service: { uiLabel: "Servicio Externo / Académico" },
 };
@@ -275,7 +273,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     funding_source: "",
     budget_unit: "",
     agreement: "",
-    category: "",
     tender: "",
     external_service: "",
     created_at: "",
@@ -461,7 +458,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       funding_source: coerceId(requisition.funding_source),
       budget_unit: coerceId(requisition.budget_unit),
       agreement: coerceId(requisition.agreement),
-      category: coerceId(requisition.category),
       tender: coerceId(requisition.tender),
       external_service: coerceId(requisition.external_service),
       created_at: yyyyMMdd,
@@ -733,7 +729,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     // UI local
     const selected = (descOptions || []).find((d) => String(d.id) === String(description));
     const descTextLocal = selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
-    const descDisplayLocal = descTextLocal ? `${descTextLocal} (ID: ${Number(description)})` : `ID: ${Number(description)}`;
+    const descDisplayLocal = descTextLocal
+      ? `${descTextLocal} (ID: ${Number(description)})`
+      : `ID: ${Number(description)}`;
 
     setBusyItemOp(true);
     try {
@@ -1003,7 +1001,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       funding_source: numOrNull(headerForm.funding_source),
       budget_unit: numOrNull(headerForm.budget_unit),
       agreement: numOrNull(headerForm.agreement),
-      category: numOrNull(headerForm.category),
       tender: numOrNull(headerForm.tender),
       external_service: numOrNull(headerForm.external_service),
 
@@ -1037,7 +1034,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         funding_source: coerceId(updated.funding_source),
         budget_unit: coerceId(updated.budget_unit),
         agreement: coerceId(updated.agreement),
-        category: coerceId(updated.category),
         tender: coerceId(updated.tender),
         external_service: coerceId(updated.external_service),
         requisition_reason: updated.requisition_reason || "",
@@ -1100,7 +1096,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     }
   };
 
-  // ✅ C) handler para enviar ahora (status="sent") usando el wrapper 409
+  // ✅ handler para enviar ahora (status="sent") usando el wrapper 409
   const sendNow = async () => {
     if (items.length === 0) {
       alert("No puedes enviar una requisición sin partidas.");
@@ -1612,14 +1608,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 </div>
               </div>
 
-              {/* ✅ Panel de Cotizaciones (PDF) */}
+              {/* Panel de Cotizaciones (PDF) */}
               <RequisitionQuotesPanel
                 requisitionId={requisition.id}
                 items={items}
                 onDraftInvalidChange={setQuoteDraftInvalid}
               />
 
-              {/* ✅ Checkbox ack_cost_realistic */}
+              {/* Checkbox ack_cost_realistic */}
               <div className="mt-6 border rounded p-3 bg-gray-50">
                 <label className="flex items-start gap-2">
                   <input
@@ -1637,7 +1633,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 </label>
               </div>
 
-              {/* ✅ Admin: Monto real + auditoría */}
+              {/* Admin: Monto real + auditoría */}
               <div className="mt-6 border rounded p-4 bg-amber-50">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold">Admin — Capturar monto real</h3>
@@ -1773,7 +1769,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 />
               </div>
 
-              {/* ✅ Footer actions (Enviar + Guardar) */}
+              {/* Footer actions (Enviar + Guardar) */}
               <div className="mt-6 flex items-center justify-between">
                 <div className="flex gap-2">
                   <button type="button" onClick={goPrev} className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300">

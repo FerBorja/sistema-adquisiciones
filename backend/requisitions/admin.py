@@ -1,7 +1,7 @@
 # backend/requisitions/admin.py
 from django.contrib import admin
 from .models import (
-    Department, Project, FundingSource, BudgetUnit, Agreement, Category,
+    Department, Project, FundingSource, BudgetUnit, Agreement,
     Tender, ExternalService, UnitOfMeasurement, Product, ItemDescription,
     Requisition, RequisitionItem,
     RequisitionRealAmountLog,  # ✅ NUEVO
@@ -37,12 +37,6 @@ class BudgetUnitAdmin(admin.ModelAdmin):
 class AgreementAdmin(admin.ModelAdmin):
     list_display = ("code", "description")
     search_fields = ("code", "description")
-
-
-@admin.register(Category)
-class CategoryAdmin(admin.ModelAdmin):
-    list_display = ("name",)
-    search_fields = ("name",)
 
 
 @admin.register(Tender)
@@ -98,7 +92,7 @@ class RequisitionAdmin(admin.ModelAdmin):
     search_fields = ("id__exact", "requisition_reason")
     autocomplete_fields = (
         "project", "funding_source", "budget_unit", "agreement",
-        "category", "external_service", "tender", "requesting_department",
+        "external_service", "tender", "requesting_department",
     )
     inlines = [RequisitionItemInline]
 

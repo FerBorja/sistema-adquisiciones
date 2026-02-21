@@ -9,9 +9,6 @@ import {
   Line,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -65,7 +62,6 @@ export default function Reports() {
   // raw data states
   const [byUnit, setByUnit] = useState([]); // [{ requesting_department, total }]
   const [byMonthUnit, setByMonthUnit] = useState([]); // [{ month:'YYYY-MM', requesting_department, total }]
-  const [byCategory, setByCategory] = useState([]); // [{ category__name, total }]
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -90,12 +86,10 @@ export default function Reports() {
 
   // Fetch simple endpoints (no filters)
   const fetchStatic = async () => {
-    const [u, c] = await Promise.all([
+    const [u] = await Promise.all([
       apiClient.get("/reports/by-unit/"),
-      apiClient.get("/reports/by-category/"),
     ]);
     setByUnit(u.data || []);
-    setByCategory(c.data || []);
   };
 
   // Fetch month+unit (with optional filters)
@@ -155,13 +149,11 @@ export default function Reports() {
 
   // 2) Line (multi-series): each department as a line across months
   const lineData = useMemo(() => {
-    // Gather all months and units
     const months = Array.from(new Set((byMonthUnit || []).map((r) => r.month))).sort();
     const units = Array.from(
       new Set((byMonthUnit || []).map((r) => r.requesting_department || "—"))
     );
 
-    // Build a map month -> { month, [unit]: total }
     const map = new Map();
     for (const m of months) map.set(m, { month: m });
 
@@ -175,16 +167,6 @@ export default function Reports() {
 
     return { rows: Array.from(map.values()), units };
   }, [byMonthUnit]);
-
-  // 3) Pie: share by category
-  const dataByCategory = useMemo(() => {
-    const rows = (byCategory || []).map((r) => ({
-      name: r["category__name"] || "Sin categoría",
-      value: Number(r.total) || 0,
-    }));
-    const total = rows.reduce((acc, x) => acc + x.value, 0);
-    return { rows, total };
-  }, [byCategory]);
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-6">
@@ -285,38 +267,6 @@ export default function Reports() {
                   />
                 ))}
               </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Section>
-
-        {/* By Category (Pie) */}
-        <Section
-          title="Distribución por Categoría"
-          right={
-            <span className="text-sm text-gray-500">
-              Total: {dataByCategory.total.toLocaleString("es-MX")}
-            </span>
-          }
-        >
-          <div className="h-80 w-full">
-            <ResponsiveContainer>
-              <PieChart>
-                <Tooltip />
-                <Legend />
-                <Pie
-                  data={dataByCategory.rows}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={110}
-                  label
-                >
-                  {dataByCategory.rows.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={PALETTE[index % PALETTE.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
             </ResponsiveContainer>
           </div>
         </Section>

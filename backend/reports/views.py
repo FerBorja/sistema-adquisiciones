@@ -10,13 +10,9 @@ from django.http import HttpResponse
 from rest_framework.decorators import action
 from rest_framework import viewsets, permissions
 
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
 from requisitions.models import Requisition
 from .pdf_generator import generate_requisition_report_pdf
-from .charts import chart_bar_by_department, chart_line_month_by_department, chart_pie_by_category
+from .charts import chart_bar_by_department, chart_line_month_by_department
 
 import io
 
@@ -78,30 +74,11 @@ class RequisitionsByMonthAndUnitView(APIView):
         return Response(result)
 
 
-class RequisitionsByCategoryView(APIView):
-    """
-    Totales por Categoría
-    GET /api/reports/by-category/
-    Respuesta: [{ "category__name": "<nombre>", "total": <int> }, ...]
-    """
-    permission_classes = [IsAdminUser]
-
-    def get(self, request):
-        data = (
-            Requisition.objects
-            .values('category__name')
-            .annotate(total=Count('id'))
-            .order_by('category__name')
-        )
-        return Response(data)
-
-
 class RequisitionSummaryPDFView(APIView):
     """
     PDF de resumen con GRÁFICAS (una por página):
       Pág. 1: Barras - Requisiciones por Departamento
       Pág. 2: Líneas - Serie mensual por Departamento (respeta start_date / end_date)
-      Pág. 3: Pastel - Distribución por Categoría
     GET /api/reports/summary-pdf/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
     """
     permission_classes = [IsAdminUser]
@@ -114,7 +91,7 @@ class RequisitionSummaryPDFView(APIView):
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from datetime import datetime
 
-        # --- 1) Datos para las 3 gráficas ---
+        # --- 1) Datos para las gráficas ---
         by_dept = (
             Requisition.objects
             .values('requesting_department__name')
@@ -147,18 +124,9 @@ class RequisitionSummaryPDFView(APIView):
             'total': row['total'],
         } for row in by_month_dept]
 
-        by_cat = (
-            Requisition.objects
-            .values('category__name')
-            .annotate(total=Count('id'))
-            .order_by('category__name')
-        )
-        pie_rows = list(by_cat)
-
         # --- 2) Render de imágenes ---
         bar_png  = chart_bar_by_department(bar_rows)
         line_png = chart_line_month_by_department(line_rows)
-        pie_png  = chart_pie_by_category(pie_rows)
 
         # --- 3) Construcción del PDF con header/footer ---
         buffer = io.BytesIO()
@@ -241,22 +209,13 @@ class RequisitionSummaryPDFView(APIView):
         story.append(Paragraph("Serie Mensual por Departamento", h2))
         story.append(Spacer(1, 6))
         story.append(Image(line_png, width=540, height=300))
-        story.append(PageBreak())
-
-        # Página 3
-        story.append(Paragraph("Resumen de Requisiciones", h1))
-        if start_date or end_date:
-            story.append(Paragraph(f"Rango: {start_date or '—'} a {end_date or '—'}", small))
-        story.append(Spacer(1, 6))
-        story.append(Paragraph("Distribución por Categoría", h2))
-        story.append(Spacer(1, 6))
-        story.append(Image(pie_png, width=420, height=420))
 
         # Con header/footer en todas las páginas
         doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
 
         buffer.seek(0)
         return HttpResponse(buffer, content_type='application/pdf')
+
 
 class ReportsViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAdminUser]

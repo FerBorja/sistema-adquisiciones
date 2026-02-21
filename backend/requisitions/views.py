@@ -90,7 +90,6 @@ HEADER_ID_FIELDS = [
     "funding_source_id",
     "budget_unit_id",
     "agreement_id",
-    "category_id",
     "tender_id",
     "external_service_id",
 ]
@@ -221,7 +220,6 @@ def _find_possible_duplicates(
         (evita filtrar/leakear existencia de requisiciones ajenas).
     """
     if not item_sigs:
-        # si no hay items, cae al detector header-only (para CREATE o casos raros)
         return _find_header_only_duplicates(
             request=request,
             current_req_id=current_req_id,
@@ -244,7 +242,6 @@ def _find_possible_duplicates(
 
     qs = _filter_qs_by_header_ids(qs, header_ids)
 
-    # Prefetch ultra-ligero de items
     qs = qs.prefetch_related(
         Prefetch(
             "items",
@@ -441,7 +438,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         if not is_admin_like:
             qs = qs.filter(user=user)
 
-        # ✅ ocultar requisiciones sin items SOLO en list
         if getattr(self, "action", None) == "list":
             qs = qs.filter(item_count__gt=0)
 
@@ -450,15 +446,11 @@ class RequisitionViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-    # =========================================================================
-    # ✅ DUPLICADOS: ahora también en CREATE (POST /requisitions/)
-    # =========================================================================
     def create(self, request, *args, **kwargs):
         ser = self.get_serializer(data=request.data)
         ser.is_valid(raise_exception=True)
         vd = ser.validated_data
 
-        # status final (si no viene, normalmente tu modelo default es registered)
         status_in = vd.get("status", None)
         new_status = str(status_in or "registered").strip().lower()
 
@@ -466,9 +458,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             header_ids = _get_header_ids_from_vd_only(vd)
             reason_norm = _norm_text(vd.get("requisition_reason", "") or "")
 
-            # En CREATE normalmente aún no hay items persistidos.
-            # Si en algún flujo mandaras items anidados, aquí podrías construir firmas desde request.data,
-            # pero en tu sistema los items se crean por endpoints /items/, así que hacemos fallback header-only.
             item_sigs = set()
 
             try:
@@ -505,9 +494,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(ser.data)
         return Response(ser.data, status=status.HTTP_201_CREATED, headers=headers)
 
-    # =========================================================================
-    # ✅ DUPLICADOS: bloqueo 409 al guardar en REGISTERED y al enviar a SENT
-    # =========================================================================
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
@@ -522,7 +508,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             header_ids = _get_header_ids_from_instance_and_vd(instance, vd)
             reason_norm = _norm_text(vd.get("requisition_reason", getattr(instance, "requisition_reason", "") or "") or "")
 
-            # items ya están persistidos por tu flujo anidado
             items_qs = RequisitionItem.objects.filter(requisition=instance).only(
                 "id", "requisition_id", "product_id", "description_id"
             )
@@ -563,10 +548,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="check_duplicates")
     def check_duplicates(self, request, pk=None):
-        """
-        Debug / verificación manual:
-        GET /api/requisitions/{id}/check_duplicates/?dup_days=30
-        """
         instance = self.get_object()
 
         items_qs = RequisitionItem.objects.filter(requisition=instance).only(
@@ -605,10 +586,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
-
-    # =========================================================================
-    # ✅ NUEVO: Items anidados (GET/POST/PATCH/DELETE)
-    # =========================================================================
 
     @action(
         detail=True,
@@ -670,8 +647,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         ser.save(requisition=requisition)
 
         return Response(ser.data, status=status.HTTP_200_OK)
-
-    # =========================================================================
 
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def export_pdf(self, request, pk=None):
@@ -783,10 +758,6 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             {"real_amount": str(requisition.real_amount)},
             status=status.HTTP_200_OK
         )
-
-    # =========================================================================
-    # ✅ Cotizaciones (GET/POST/DELETE)
-    # =========================================================================
 
     @action(
         detail=True,

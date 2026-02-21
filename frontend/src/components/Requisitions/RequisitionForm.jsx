@@ -30,7 +30,6 @@ export default function RequisitionForm({
 
   const [catalogs, setCatalogs] = useState({
     projects: [],
-    categories: [],
     funding_sources: [],
     budget_units: [],
     agreements: [],
@@ -46,7 +45,6 @@ export default function RequisitionForm({
     budget_unit: '',
     agreement: '',
     tender: '',
-    category: '',
     title: '',
     description: '',
     external_service: '',
@@ -58,7 +56,6 @@ export default function RequisitionForm({
     budget_unit_label: '',
     agreement_label: '',
     tender_label: '',
-    category_label: '',
     external_service_label: '',
   }));
 
@@ -103,7 +100,6 @@ export default function RequisitionForm({
       try {
         const [
           projRes,
-          catRes,
           fundRes,
           buRes,
           agreeRes,
@@ -111,7 +107,6 @@ export default function RequisitionForm({
           extRes,
         ] = await Promise.all([
           apiClient.get('/catalogs/projects/'),
-          apiClient.get('/catalogs/categories/'),
           apiClient.get('/catalogs/funding-sources/'),
           apiClient.get('/catalogs/budget-units/'),
           apiClient.get('/catalogs/agreements/'),
@@ -121,7 +116,6 @@ export default function RequisitionForm({
 
         setCatalogs({
           projects: projRes.data || [],
-          categories: catRes.data || [],
           funding_sources: fundRes.data || [],
           budget_units: buRes.data || [],
           agreements: agreeRes.data || [],
@@ -142,7 +136,7 @@ export default function RequisitionForm({
     update((prev) => ({ ...prev, [valueKey]: id || '', [labelKey]: label }));
   };
 
-  // When editing: hydrate the form with initialData (values + labels) once catalogs are loaded
+  // When editing: hydrate the form with initialData (values + labels)
   useEffect(() => {
     if (mode !== 'edit' || !initialData) return;
 
@@ -167,7 +161,6 @@ export default function RequisitionForm({
       budget_unit,
       agreement,
       tender,
-      category,
       external_service,
     } = initialData;
 
@@ -175,12 +168,35 @@ export default function RequisitionForm({
     const getId = (objOrId) => (objOrId && typeof objOrId === 'object' ? objOrId.id : objOrId);
 
     setValueAndLabel('project', 'project_label', getId(project), catalogs.projects, (p) => p.description);
-    setValueAndLabel('funding_source', 'funding_source_label', getId(funding_source), catalogs.funding_sources, (fs) => `${fs.code} - ${fs.description}`);
-    setValueAndLabel('budget_unit', 'budget_unit_label', getId(budget_unit), catalogs.budget_units, (bu) => `${bu.code} - ${bu.description}`);
-    setValueAndLabel('agreement', 'agreement_label', getId(agreement), catalogs.agreements, (a) => `${a.code} - ${a.description}`);
+    setValueAndLabel(
+      'funding_source',
+      'funding_source_label',
+      getId(funding_source),
+      catalogs.funding_sources,
+      (fs) => `${fs.code} - ${fs.description}`
+    );
+    setValueAndLabel(
+      'budget_unit',
+      'budget_unit_label',
+      getId(budget_unit),
+      catalogs.budget_units,
+      (bu) => `${bu.code} - ${bu.description}`
+    );
+    setValueAndLabel(
+      'agreement',
+      'agreement_label',
+      getId(agreement),
+      catalogs.agreements,
+      (a) => `${a.code} - ${a.description}`
+    );
     setValueAndLabel('tender', 'tender_label', getId(tender), catalogs.tenders, (t) => t.name);
-    setValueAndLabel('category', 'category_label', getId(category), catalogs.categories, (c) => c.name);
-    setValueAndLabel('external_service', 'external_service_label', getId(external_service), catalogs.external_services, (s) => s.name);
+    setValueAndLabel(
+      'external_service',
+      'external_service_label',
+      getId(external_service),
+      catalogs.external_services,
+      (s) => s.name
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, initialData, catalogs]);
 
@@ -208,7 +224,6 @@ export default function RequisitionForm({
         budget_unit: data.budget_unit || null,
         agreement: data.agreement || null,
         tender: data.tender || null,
-        category: data.category || null,
         external_service: data.external_service || null,
         requisition_reason: data.description || '',
         ...(typeof ackCostRealistic === 'boolean' ? { ack_cost_realistic: ackCostRealistic } : {}),
@@ -336,23 +351,6 @@ export default function RequisitionForm({
         {catalogs.tenders.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
-          </option>
-        ))}
-      </select>
-
-      <label className="block mb-1 font-medium">Categoría</label>
-      <select
-        name="category"
-        value={data.category}
-        onChange={(e) => handleSelectChange(e, 'category', 'category_label')}
-        required
-        onInvalid={(e) => setRequiredMessage(e, 'Por favor seleccione una categoría')}
-        className="border p-2 w-full rounded"
-      >
-        <option value="">Seleccione Categoría</option>
-        {catalogs.categories.map((cat) => (
-          <option key={cat.id} value={cat.id}>
-            {cat.name}
           </option>
         ))}
       </select>

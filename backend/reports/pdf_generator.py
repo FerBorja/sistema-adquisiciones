@@ -15,8 +15,8 @@ from reportlab.platypus import (
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
-# Importa las gráficas que ya creamos
-from .charts import chart_bar_by_department, chart_pie_by_category
+# ✅ Importa SOLO lo que existe y se usa
+from .charts import chart_bar_by_department
 
 # --- Mini helper local para pastel de ESTATUS (para no tocar charts.py si no quieres) ---
 import matplotlib

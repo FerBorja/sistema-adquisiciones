@@ -69,27 +69,7 @@ def chart_line_month_by_department(rows):
     ax.set_ylabel("Total")
     ax.grid(True, linestyle='--', alpha=0.4)
     ax.legend(fontsize=8, ncol=2, loc='upper left')
-    # Etiquetas “YYYY-MM” legibles
     ax.set_xticks(months_sorted)
     ax.set_xticklabels(months_sorted, rotation=20, fontsize=8)
-
-    return _fig_to_png_bytesio(fig)
-
-def chart_pie_by_category(rows):
-    """
-    rows: iterable de dicts con:
-      {'category__name': 'Nombre', 'total': int}
-    """
-    labels = [(r.get('category__name') or 'Sin categoría') for r in rows]
-    values = [int(r.get('total') or 0) for r in rows]
-
-    # Evitar pastel vacío
-    if sum(values) == 0:
-        labels = ['Sin datos']
-        values = [1]
-
-    fig, ax = plt.subplots(figsize=(7, 7))
-    ax.pie(values, labels=labels, autopct='%1.1f%%')
-    ax.set_title("Distribución por Categoría")
 
     return _fig_to_png_bytesio(fig)

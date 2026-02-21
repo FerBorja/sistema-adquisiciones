@@ -27,8 +27,8 @@ async function saveWithDuplicateCheck({
       method === "post"
         ? await apiClient.post(url, payload)
         : method === "patch"
-        ? await apiClient.patch(url, payload)
-        : await apiClient.put(url, payload);
+          ? await apiClient.patch(url, payload)
+          : await apiClient.put(url, payload);
 
     return { ok: true, data: res.data };
   } catch (err) {
@@ -75,8 +75,8 @@ async function saveWithDuplicateCheck({
         method === "post"
           ? await apiClient.post(forceUrl, payload)
           : method === "patch"
-          ? await apiClient.patch(forceUrl, payload)
-          : await apiClient.put(forceUrl, payload);
+            ? await apiClient.patch(forceUrl, payload)
+            : await apiClient.put(forceUrl, payload);
 
       return { ok: true, data: res2.data, forced: true, duplicates: data.duplicates };
     }
@@ -100,7 +100,6 @@ export default function RequisitionWizard() {
     budget_unit: "",
     agreement: "",
     tender: "",
-    category: "",
     title: "",
     description: "",
     external_service: "",
@@ -112,7 +111,6 @@ export default function RequisitionWizard() {
     budget_unit_label: "",
     agreement_label: "",
     tender_label: "",
-    category_label: "",
     external_service_label: "",
   }));
 
@@ -207,7 +205,6 @@ export default function RequisitionWizard() {
       budget_unit: "",
       agreement: "",
       tender: "",
-      category: "",
       title: "",
       description: "",
       external_service: "",
@@ -218,7 +215,6 @@ export default function RequisitionWizard() {
       budget_unit_label: "",
       agreement_label: "",
       tender_label: "",
-      category_label: "",
       external_service_label: "",
     });
 
@@ -274,7 +270,6 @@ export default function RequisitionWizard() {
       budget_unit: idOrUndef(formData.budget_unit),
       agreement: idOrUndef(formData.agreement),
       tender: idOrUndef(formData.tender),
-      category: idOrUndef(formData.category),
       external_service: idOrUndef(formData.external_service),
       requisition_reason: strOrUndef(formData.description),
       observations: strOrUndef(observations),
@@ -738,19 +733,19 @@ export default function RequisitionWizard() {
                 quoteDraftInvalid
                   ? "Hay una cotización seleccionada sin partidas marcadas (completa o quita el PDF)."
                   : disableSaveByAck
-                  ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
-                  : draftBusy
-                  ? "Guardando borrador…"
-                  : ""
+                    ? 'Debes confirmar "costo aproximado pero realista" para poder guardar.'
+                    : draftBusy
+                      ? "Guardando borrador…"
+                      : ""
               }
             >
               {saving || draftBusy
                 ? "Guardando…"
                 : quoteDraftInvalid
-                ? "Guardar (cotización incompleta)"
-                : disableSaveByAck
-                ? "Guardar (confirma costo)"
-                : "Guardar"}
+                  ? "Guardar (cotización incompleta)"
+                  : disableSaveByAck
+                    ? "Guardar (confirma costo)"
+                    : "Guardar"}
             </button>
           </div>
         </>

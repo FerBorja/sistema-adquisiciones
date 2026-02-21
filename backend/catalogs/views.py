@@ -4,12 +4,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from requisitions.models import (
     Department, Project, FundingSource, BudgetUnit,
-    Agreement, Category, Tender, ExternalService,
+    Agreement, Tender, ExternalService,
     UnitOfMeasurement, Product, ItemDescription
 )
 from .serializers import (
     DepartmentSerializer, ProjectSerializer, FundingSourceSerializer, BudgetUnitSerializer,
-    AgreementSerializer, CategorySerializer, TenderSerializer, ExternalServiceSerializer,
+    AgreementSerializer, TenderSerializer, ExternalServiceSerializer,
     UnitOfMeasurementSerializer, ProductSerializer, ItemDescriptionSerializer
 )
 
@@ -40,11 +40,6 @@ class BudgetUnitViewSet(viewsets.ModelViewSet):
 class AgreementViewSet(viewsets.ModelViewSet):
     queryset = Agreement.objects.all()
     serializer_class = AgreementSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-class CategoryViewSet(viewsets.ModelViewSet):
-    queryset = Category.objects.all()
-    serializer_class = CategorySerializer
     permission_classes = [permissions.IsAuthenticated]
 
 class TenderViewSet(viewsets.ModelViewSet):

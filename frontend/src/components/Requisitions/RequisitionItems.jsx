@@ -21,6 +21,13 @@ export default function RequisitionItems({
     return n.toFixed(2);
   };
 
+  const fmtMoneyLocale = (v) => {
+    if (v === null || typeof v === 'undefined' || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    return n.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
+
   // ============================
   // STEP 2: Registro de Partidas
   // ============================
@@ -42,7 +49,9 @@ export default function RequisitionItems({
           const res = await apiClient.get(url);
           const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
           if (arr.length) return arr;
-        } catch { /* try next */ }
+        } catch {
+          /* try next */
+        }
       }
       return [];
     };
@@ -82,16 +91,43 @@ export default function RequisitionItems({
       setDescOptions([]);
       return;
     }
+
+    const candidates = [
+      `/catalogs/item-descriptions/?product=${productId}`,
+      `/item-descriptions/?product=${productId}`,
+      `/catalogs/descriptions/?product=${productId}`,
+      `/catalogs/item-descriptions/?product_id=${productId}`,
+      `/item-descriptions/?product_id=${productId}`,
+      `/catalogs/descriptions/?product_id=${productId}`,
+    ];
+
     try {
-      const res = await apiClient.get(`/catalogs/item-descriptions/?product=${productId}`);
-      const arr = Array.isArray(res.data) ? res.data : (res.data?.results || []);
-      const options = arr
+      let arr = null;
+
+      for (const url of candidates) {
+        try {
+          const res = await apiClient.get(url);
+          const data = Array.isArray(res.data) ? res.data : (res.data?.results || []);
+          if (Array.isArray(data)) {
+            arr = data;
+            break;
+          }
+        } catch {
+          /* try next */
+        }
+      }
+
+      const safeArr = Array.isArray(arr) ? arr : [];
+
+      const options = safeArr
         .map((d) => ({
-          id: d.id,
-          text: d.text,
-          estimated_unit_cost: d.estimated_unit_cost,
+          id: d.id ?? d.pk ?? d.uuid,
+          text: d.text ?? d.descripcion ?? d.name ?? d.label ?? '',
+          estimated_unit_cost: d.estimated_unit_cost ?? d.costo ?? d.cost ?? '',
         }))
+        .filter((x) => x.id != null)
         .sort((a, b) => (a.text || '').localeCompare(b.text || '', 'es'));
+
       setDescOptions(options);
     } catch (e) {
       console.error('Error loading item-descriptions by product:', e);
@@ -461,7 +497,6 @@ export default function RequisitionItems({
         <div><div className="text-sm text-gray-500">Unidad Presupuestal</div><div className="font-medium">{formData.budget_unit_label || formData.budget_unit}</div></div>
         <div><div className="text-sm text-gray-500">Convenio</div><div className="font-medium">{formData.agreement_label || formData.agreement}</div></div>
         <div><div className="text-sm text-gray-500">Licitación</div><div className="font-medium">{formData.tender_label || formData.tender}</div></div>
-        <div><div className="text-sm text-gray-500">Categoría</div><div className="font-medium">{formData.category_label || formData.category}</div></div>
         <div><div className="text-sm text-gray-500">Fecha</div><div className="font-medium">{formData.fecha}</div></div>
         <div className="md:col-span-2"><div className="text-sm text-gray-500">Motivos Requisición</div><div className="font-medium">{formData.description}</div></div>
         <div><div className="text-sm text-gray-500">Solicitante</div><div className="font-medium">{formData.solicitante}</div></div>
@@ -664,8 +699,8 @@ export default function RequisitionItems({
                 <td className="p-2 border">{p.product_label}</td>
                 <td className="p-2 border">{p.quantity}</td>
                 <td className="p-2 border">{p.unit_label}</td>
-                <td className="p-2 border">{p.estimated_unit_cost ? Number(p.estimated_unit_cost).toFixed(2) : '—'}</td>
-                <td className="p-2 border">{Number(p.estimated_total).toLocaleString('es-MX')}</td>
+                <td className="p-2 border">{p.estimated_unit_cost ? fmtMoneyLocale(p.estimated_unit_cost) : '—'}</td>
+                <td className="p-2 border">{fmtMoneyLocale(p.estimated_total)}</td>
                 <td className="p-2 border">{p.description_label}</td>
                 <td className="p-2 border">
                   <button
