@@ -3,6 +3,7 @@ import React, { useEffect, useState, useContext, useMemo } from 'react';
 import apiClient from '../api/apiClient';
 import { AuthContext } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { PDFDocument } from 'pdf-lib';
 
 // Map DB statuses -> Spanish labels (case-insensitive)
 const STATUS_LABEL = new Map([
@@ -43,6 +44,71 @@ async function readErrorMessage(res) {
   } catch (e) {
     return 'Error desconocido (no se pudo leer la respuesta).';
   }
+}
+
+// Duplica páginas: 1,1,2,2,3,3...
+async function duplicatePdfPages(pdfBytes) {
+  const original = await PDFDocument.load(pdfBytes);
+  const out = await PDFDocument.create();
+
+  const indices = original.getPageIndices();
+  for (const idx of indices) {
+    const [p1] = await out.copyPages(original, [idx]);
+    out.addPage(p1);
+    const [p2] = await out.copyPages(original, [idx]);
+    out.addPage(p2);
+  }
+
+  return await out.save();
+}
+
+// Imprime un PDF (bytes) sin descargar: crea iframe invisible y llama print()
+async function printPdfBytes(pdfBytes) {
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  iframe.src = url;
+
+  document.body.appendChild(iframe);
+
+  const cleanup = () => {
+    try {
+      document.body.removeChild(iframe);
+    } catch {}
+    URL.revokeObjectURL(url);
+  };
+
+  // Nota: algunos navegadores tardan en cargar el PDF dentro del iframe
+  iframe.onload = () => {
+    const w = iframe.contentWindow;
+    if (!w) {
+      cleanup();
+      return;
+    }
+
+    // Limpieza cuando termine la impresión (si el navegador lo soporta)
+    w.onafterprint = () => cleanup();
+
+    // Dispara print con una pequeña espera para asegurar render del PDF
+    setTimeout(() => {
+      try {
+        w.focus();
+        w.print();
+      } catch (e) {
+        cleanup();
+      }
+    }, 250);
+
+    // Fallback de limpieza por si onafterprint no dispara
+    setTimeout(() => cleanup(), 15000);
+  };
 }
 
 export default function RequisitionsList() {
@@ -111,7 +177,8 @@ export default function RequisitionsList() {
     );
   };
 
-  const handleExportPDF = async (id) => {
+  // Descarga el PDF (como antes)
+  const handleDownloadPDF = async (id) => {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
@@ -153,6 +220,42 @@ export default function RequisitionsList() {
     }
   };
 
+  // Imprime directamente con páginas duplicadas (sin descargar)
+  const handlePrintDuplicatedPDF = async (id) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('No se encontró token. Inicia sesión de nuevo.');
+        return;
+      }
+
+      const url = `http://localhost:8000/api/requisitions/${id}/export_pdf/`;
+
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/pdf,application/json;q=0.9,*/*;q=0.8',
+        },
+      });
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        console.error('PDF error:', res.status, msg);
+        alert(`Error ${res.status}:\n${msg}`);
+        return;
+      }
+
+      const originalBytes = await res.arrayBuffer();
+      const duplicatedBytes = await duplicatePdfPages(originalBytes);
+
+      await printPdfBytes(duplicatedBytes);
+    } catch (err) {
+      console.error(err);
+      alert('No se pudo imprimir el PDF (error inesperado).');
+    }
+  };
+
   // ---- Búsqueda global (folio/id, fecha, motivo, estatus) ----
   const filteredRequisitions = useMemo(() => {
     const q = normalize(searchTerm);
@@ -167,8 +270,8 @@ export default function RequisitionsList() {
         r.id, // folio mostrado en tabla actualmente
         ...(dateVariants(r.created_at)),
         r.requisition_reason,
-        r.status,       // por si el usuario escribe "completed"
-        statusLabel,    // por si escribe "completado"
+        r.status, // "completed"
+        statusLabel, // "Completado"
       ];
 
       const haystack = normalize(parts.join(' '));
@@ -199,11 +302,7 @@ export default function RequisitionsList() {
         />
 
         {searchTerm && (
-          <button
-            onClick={() => setSearchTerm('')}
-            className="px-3 py-2 border rounded bg-white"
-            type="button"
-          >
+          <button onClick={() => setSearchTerm('')} className="px-3 py-2 border rounded bg-white" type="button">
             Limpiar
           </button>
         )}
@@ -221,7 +320,7 @@ export default function RequisitionsList() {
               <th className="px-4 py-2 border">Fecha</th>
               <th className="px-4 py-2 border">Motivo</th>
               <th className="px-4 py-2 border">Estatus</th>
-              <th className="px-4 py-2 border">Imprimir</th>
+              <th className="px-4 py-2 border">Exportar</th>
               {canModify && <th className="px-4 py-2 border">Modificar</th>}
             </tr>
           </thead>
@@ -244,36 +343,55 @@ export default function RequisitionsList() {
                       {req.created_at ? new Date(req.created_at).toLocaleDateString('es-MX') : ''}
                     </td>
 
-                    <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                      {req.requisition_reason}
-                    </td>
+                    <td className="px-4 py-2 border-2 border-indigo-300 text-center">{req.requisition_reason}</td>
+
+                    <td className="px-4 py-2 border-2 border-indigo-300 text-center">{displayStatus(req.status)}</td>
 
                     <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                      {displayStatus(req.status)}
-                    </td>
+                      <div className="flex items-center justify-center gap-2">
+                        {/* PDF (descarga) */}
+                        <button
+                          disabled={!canPrint}
+                          className={`px-2 py-1 rounded text-white ${
+                            canPrint ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
+                          }`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!canPrint) return;
+                            handleDownloadPDF(req.id);
+                          }}
+                          title={canPrint ? 'Descargar PDF' : 'Primero confirma: costo aproximado realista (en Modificar)'}
+                          type="button"
+                        >
+                          PDF
+                        </button>
 
-                    <td className="px-4 py-2 border-2 border-indigo-300 text-center">
-                      <button
-                        disabled={!canPrint}
-                        className={`px-2 py-1 rounded text-white ${
-                          canPrint ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-400 cursor-not-allowed'
-                        }`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (!canPrint) return;
-                          handleExportPDF(req.id);
-                        }}
-                        title={canPrint ? 'Exportar PDF' : 'Primero confirma: costo aproximado pero realista (en Modificar)'}
-                        type="button"
-                      >
-                        PDF
-                      </button>
+                        {/* Imprimir (sin descargar, duplicando páginas) */}
+                        <button
+                          disabled={!canPrint}
+                          className={`px-2 py-1 rounded text-white ${
+                            canPrint ? 'bg-purple-600 hover:bg-purple-700' : 'bg-gray-400 cursor-not-allowed'
+                          }`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!canPrint) return;
+                            handlePrintDuplicatedPDF(req.id);
+                          }}
+                          title={
+                            canPrint
+                              ? 'Imprimir 2 copias (páginas duplicadas)'
+                              : 'Primero confirma: costo aproximado realista (en Modificar)'
+                          }
+                          type="button"
+                        >
+                          Imprimir
+                        </button>
+                      </div>
 
                       {!canPrint && (
-                        <div className="text-xs text-red-600 mt-1">
-                          Confirma “costo aproximado realista” en Modificar.
-                        </div>
+                        <div className="text-xs text-red-600 mt-1">Confirma “costo aproximado realista” en Modificar.</div>
                       )}
                     </td>
 
