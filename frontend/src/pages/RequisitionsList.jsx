@@ -1,5 +1,5 @@
 // frontend/src/pages/RequisitionsList.jsx
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState, useContext, useMemo } from 'react';
 import apiClient from '../api/apiClient';
 import { AuthContext } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -50,10 +50,35 @@ export default function RequisitionsList() {
   const navigate = useNavigate();
 
   const [requisitions, setRequisitions] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const userRole = user?.role?.toLowerCase() || '';
   const canModify = userRole === 'admin' || userRole === 'superuser';
   const userName = `${user?.first_name ?? ''} ${user?.last_name ?? ''}`.trim();
+
+  // ---- Helpers para búsqueda (tolerante a acentos / mayúsculas / fechas) ----
+  const normalize = (v) =>
+    (v ?? '')
+      .toString()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .trim();
+
+  const dateVariants = (value) => {
+    if (!value) return [''];
+    const raw = String(value);
+
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return [raw];
+
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+
+    // Incluye varias formas comunes
+    return [raw, `${dd}/${mm}/${yyyy}`, `${dd}-${mm}-${yyyy}`, `${yyyy}-${mm}-${dd}`];
+  };
 
   useEffect(() => {
     const fetchRequisitions = async () => {
@@ -128,6 +153,29 @@ export default function RequisitionsList() {
     }
   };
 
+  // ---- Búsqueda global (folio/id, fecha, motivo, estatus) ----
+  const filteredRequisitions = useMemo(() => {
+    const q = normalize(searchTerm);
+    if (!q) return requisitions ?? [];
+
+    const tokens = q.split(/\s+/).filter(Boolean);
+
+    return (requisitions ?? []).filter((r) => {
+      const statusLabel = displayStatus(r.status);
+
+      const parts = [
+        r.id, // folio mostrado en tabla actualmente
+        ...(dateVariants(r.created_at)),
+        r.requisition_reason,
+        r.status,       // por si el usuario escribe "completed"
+        statusLabel,    // por si escribe "completado"
+      ];
+
+      const haystack = normalize(parts.join(' '));
+      return tokens.every((t) => haystack.includes(t));
+    });
+  }, [requisitions, searchTerm]);
+
   return (
     <div className="flex flex-col">
       <h1 className="text-xl font-semibold mb-2">
@@ -139,6 +187,31 @@ export default function RequisitionsList() {
       <p className="text-red-600 font-bold mb-4">
         * Nota: Las solicitudes una vez autorizadas no pueden ser modificadas por el usuario.
       </p>
+
+      {/* Buscador */}
+      <div className="flex items-center gap-3 my-3">
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Buscar por folio, fecha, motivo, estatus..."
+          className="w-[420px] px-3 py-2 border rounded"
+        />
+
+        {searchTerm && (
+          <button
+            onClick={() => setSearchTerm('')}
+            className="px-3 py-2 border rounded bg-white"
+            type="button"
+          >
+            Limpiar
+          </button>
+        )}
+
+        <div className="ml-auto text-sm opacity-70">
+          Mostrando {filteredRequisitions.length} de {(requisitions ?? []).length}
+        </div>
+      </div>
 
       <div className="overflow-x-auto">
         <table className="min-w-full border border-gray-300">
@@ -154,14 +227,14 @@ export default function RequisitionsList() {
           </thead>
 
           <tbody>
-            {requisitions.length === 0 ? (
+            {filteredRequisitions.length === 0 ? (
               <tr>
                 <td colSpan={canModify ? 6 : 5} className="text-center py-4 border-2 border-indigo-300">
-                  No hay requisiciones
+                  {searchTerm ? 'No hay coincidencias' : 'No hay requisiciones'}
                 </td>
               </tr>
             ) : (
-              requisitions.map((req) => {
+              filteredRequisitions.map((req) => {
                 const canPrint = req?.ack_cost_realistic === true; // si no viene el campo, queda false
                 return (
                   <tr key={req.id} className="even:bg-gray-50 hover:bg-indigo-50 transition-colors">
@@ -191,11 +264,8 @@ export default function RequisitionsList() {
                           if (!canPrint) return;
                           handleExportPDF(req.id);
                         }}
-                        title={
-                          canPrint
-                            ? 'Exportar PDF'
-                            : 'Primero confirma: costo aproximado pero realista (en Modificar)'
-                        }
+                        title={canPrint ? 'Exportar PDF' : 'Primero confirma: costo aproximado pero realista (en Modificar)'}
+                        type="button"
                       >
                         PDF
                       </button>
