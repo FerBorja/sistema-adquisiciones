@@ -133,7 +133,6 @@ export default function RequisitionWizard() {
   const [observations, setObservations] = useState("");
 
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
 
   // ✅ ACK costo aproximado realista
   const [ackCostRealistic, setAckCostRealistic] = useState(false);
@@ -429,8 +428,8 @@ export default function RequisitionWizard() {
     return await draftCreatePromiseRef.current;
   }
 
-  // ✅ Guardar/Enviar centralizado
-  async function doSaveAll({ silent = true, overrideStatus = null, interactiveDuplicates = true } = {}) {
+  // ✅ Guardar centralizado (solo guardar)
+  async function doSaveAll({ silent = true, interactiveDuplicates = true } = {}) {
     const header = buildHeaderPayload();
     if (!header) return { ok: false, error: "HEADER" };
 
@@ -438,8 +437,6 @@ export default function RequisitionWizard() {
 
     const { invalidLines, normalizedItems } = normalizeItemsForPayload(items);
     if (invalidLines.length) return { ok: false, error: "INVALID_LINES", invalidLines };
-
-    const actionLabel = overrideStatus === "sent" ? "ENVIAR" : "GUARDAR";
 
     // 1) Si no existe requisición aún → POST con items
     if (!draftReqRef.current?.id) {
@@ -449,51 +446,16 @@ export default function RequisitionWizard() {
       }
 
       const created = createdRes.data;
-
-      // Si solo estamos “guardando”, con el POST basta.
-      if (!overrideStatus) {
-        return { ok: true, data: created, forced: !!createdRes.forced, duplicates: createdRes.duplicates };
-      }
-
-      // Si estamos “enviando”, PUT status=sent (también puede disparar 409)
-      const payload = {
-        ...header,
-        items: normalizedItems,
-        status: overrideStatus,
-      };
-
-      const result = await saveWithDuplicateCheck({
-        reqId: created.id,
-        payload,
-        method: "put",
-        interactive: interactiveDuplicates,
-        actionLabel,
-      });
-
-      if (!result.ok && result.cancelled) {
-        if (!silent) showToast("Envío cancelado: revisa datos para evitar duplicado.", "error");
-        return { ok: false, cancelled: true, duplicates: result.duplicates };
-      }
-
-      const updated = result.data;
-      draftReqRef.current = updated;
-      setDraftReq(updated);
-
-      if (Array.isArray(updated?.items)) {
-        setItems((prev) => mergeItemIds(prev, updated.items));
-      }
-
-      return { ok: true, data: updated, forced: !!result.forced, duplicates: result.duplicates };
+      return { ok: true, data: created, forced: !!createdRes.forced, duplicates: createdRes.duplicates };
     }
 
-    // 2) Si ya existe → PUT (con o sin status)
+    // 2) Si ya existe → PUT
     try {
       setDraftBusy(true);
 
       const payload = {
         ...header,
         items: normalizedItems,
-        ...(overrideStatus ? { status: overrideStatus } : {}),
       };
 
       const result = await saveWithDuplicateCheck({
@@ -501,7 +463,7 @@ export default function RequisitionWizard() {
         payload,
         method: "put",
         interactive: interactiveDuplicates,
-        actionLabel,
+        actionLabel: "GUARDAR",
       });
 
       if (!result.ok && result.cancelled) {
@@ -585,7 +547,7 @@ export default function RequisitionWizard() {
       // Si el backend detectó duplicado, NO popup; solo aviso (una vez)
       if (!r.ok && r.needsConfirmation && !dupToastShownRef.current) {
         dupToastShownRef.current = true;
-        showToast("⚠️ Posible duplicado detectado. Al guardar/enviar se te pedirá confirmación.", "error");
+        showToast("⚠️ Posible duplicado detectado. Al guardar se te pedirá confirmación.", "error");
       }
 
       // Si falló por otra cosa, permitimos reintentar
@@ -665,69 +627,6 @@ export default function RequisitionWizard() {
     }
   };
 
-  // ====== Enviar (status -> sent + duplicados) ======
-  const sendingRef = useRef(false);
-
-  const handleSendNow = async () => {
-    if (sendingRef.current) return;
-
-    if (quoteDraftInvalid) {
-      showToast("Tienes una cotización seleccionada pero sin partidas marcadas. Completa los checkboxes o quita el PDF.", "error");
-      return;
-    }
-
-    if (!ackCostRealistic) {
-      showToast('Debes confirmar "costo aproximado pero realista" para poder enviar.', "error");
-      return;
-    }
-
-    if (!items || items.length === 0) {
-      showToast("No puedes enviar una requisición sin partidas.", "error");
-      return;
-    }
-
-    const { invalidLines } = normalizeItemsForPayload(items);
-    if (invalidLines.length) {
-      showToast(`Falta "Monto estimado" válido (> 0) en los renglones: ${invalidLines.join(", ")}`, "error");
-      return;
-    }
-
-    if (!window.confirm("¿Enviar esta requisición a Unidad Central?")) return;
-
-    try {
-      sendingRef.current = true;
-      setSending(true);
-
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-
-      // ✅ interactivo: si hay duplicado al ENVIAR, confirm
-      const res = await doSaveAll({ silent: true, overrideStatus: "sent", interactiveDuplicates: true });
-
-      if (!res?.ok && res?.cancelled) {
-        showToast("Envío cancelado: revisa datos para evitar duplicado.", "error");
-        return;
-      }
-
-      const saved = res?.data;
-      const id = saved?.id || draftReqRef.current?.id;
-
-      if (!id) {
-        showToast("No se pudo enviar. Intenta de nuevo.", "error");
-        return;
-      }
-
-      const extra = res?.forced ? " ⚠️ Confirmaste posible duplicado." : " ✅ Sin duplicados detectados.";
-      showToast(`Requisición #${id} enviada a Unidad Central.${extra}`, "success");
-      navigate("/requisitions");
-    } catch (e) {
-      console.error(e);
-      showToast("No se pudo enviar.", "error");
-    } finally {
-      setSending(false);
-      sendingRef.current = false;
-    }
-  };
-
   const allItemsHaveId = useMemo(() => {
     if (!Array.isArray(items) || items.length === 0) return false;
     return items.every((it) => Boolean(it?.id));
@@ -799,7 +698,11 @@ export default function RequisitionWizard() {
               Guardando borrador para habilitar cotizaciones (asignando IDs a partidas)…
             </div>
           ) : (
-            <RequisitionQuotesPanel requisitionId={draftReq.id} items={items} onDraftInvalidChange={setQuoteDraftInvalid} />
+            <RequisitionQuotesPanel
+              requisitionId={draftReq.id}
+              items={items}
+              onDraftInvalidChange={setQuoteDraftInvalid}
+            />
           )}
 
           {/* Observaciones */}
@@ -819,31 +722,9 @@ export default function RequisitionWizard() {
               type="button"
               onClick={handleCancel}
               className="bg-gray-300 hover:bg-gray-400 text-black px-4 py-2 rounded"
-              disabled={saving || sending}
+              disabled={saving || draftBusy}
             >
               Cancelar
-            </button>
-
-            <button
-              type="button"
-              onClick={handleSendNow}
-              className={`bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded disabled:opacity-60 ${
-                disableSaveByAck || quoteDraftInvalid || items.length === 0 ? "opacity-60" : ""
-              }`}
-              disabled={sending || saving || disableSaveByAck || quoteDraftInvalid || draftBusy}
-              title={
-                quoteDraftInvalid
-                  ? "Hay una cotización seleccionada sin partidas marcadas (completa o quita el PDF)."
-                  : disableSaveByAck
-                  ? 'Debes confirmar "costo aproximado pero realista" para poder enviar.'
-                  : draftBusy
-                  ? "Guardando borrador…"
-                  : items.length === 0
-                  ? "Primero agrega partidas."
-                  : ""
-              }
-            >
-              {sending ? "Enviando…" : "Enviar"}
             </button>
 
             <button
@@ -852,7 +733,7 @@ export default function RequisitionWizard() {
               className={`bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded disabled:opacity-60 ${
                 disableSaveByAck || quoteDraftInvalid ? "opacity-60" : ""
               }`}
-              disabled={saving || sending || disableSaveByAck || quoteDraftInvalid || draftBusy}
+              disabled={saving || disableSaveByAck || quoteDraftInvalid || draftBusy}
               title={
                 quoteDraftInvalid
                   ? "Hay una cotización seleccionada sin partidas marcadas (completa o quita el PDF)."
