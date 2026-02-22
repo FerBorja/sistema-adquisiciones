@@ -3,6 +3,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import apiClient from '../../api/apiClient';
 import { useToast } from '../../contexts/ToastContext';
 
+/* [LICIT] Alta de nuevos productos deshabilitada en UI (solo vía Django admin) */
+const SHOW_REGISTER_PRODUCT_BUTTON = false;
+
 /** ✅ Alert reusable: solo para modo manual (NO APLICA) */
 function ManualUomWarning({ unitLabel }) {
   return (
@@ -806,13 +809,16 @@ export default function RequisitionItems({
                 Ver Catálogo
               </button>
 
-              <button
-                type="button"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); openRegistro(); }}
-                className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
-              >
-                Registrar
-              </button>
+              {/* [LICIT] Registrar oculto (alta solo vía Django admin) */}
+              {SHOW_REGISTER_PRODUCT_BUTTON ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openRegistro(); }}
+                  className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+                >
+                  Registrar
+                </button>
+              ) : null}
             </>
           )}
 

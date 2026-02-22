@@ -8,6 +8,9 @@ import RequisitionQuotesPanel from "./RequisitionQuotesPanel";
 /* ✅ Ruta a la lista (ajústala si tu app usa otra) */
 const LIST_ROUTE = "/requisitions";
 
+/* [LICIT] Alta de nuevos productos deshabilitada en UI (solo vía Django admin) */
+const SHOW_REGISTER_PRODUCT_BUTTON = false;
+
 /* ────────────────────────────────────────────────────────────────────────────
    Step 1 catalog endpoints: try múltiples candidatos hasta que uno funcione.
    NOTE: administrative_unit NO es catálogo (es CharField editable=False en backend),
@@ -1676,17 +1679,20 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                           Ver Catálogo
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            openRegisterModal();
-                          }}
-                          className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
-                        >
-                          Registrar
-                        </button>
+                        {/* [LICIT] Registrar oculto (alta solo vía Django admin) */}
+                        {SHOW_REGISTER_PRODUCT_BUTTON ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openRegisterModal();
+                            }}
+                            className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            Registrar
+                          </button>
+                        ) : null}
                       </>
                     )}
                   </div>
