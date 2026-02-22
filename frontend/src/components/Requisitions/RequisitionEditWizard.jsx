@@ -425,6 +425,31 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     return labelFrom(units, form.unit, (r) => r.name ?? r.description ?? r.code ?? String(r.id));
   }, [manualItemsMode, form.unit, units]);
 
+  /* ────────────────────────────────────────────────────────────────
+     [LICIT] LOCK: todas las partidas deben compartir el mismo product
+     - Si hay items: se bloquea al product del 1er item
+     - Si no hay items: se desbloquea
+  ──────────────────────────────────────────────────────────────── */
+  const lockedProductId = useMemo(() => {
+    const first = (items || [])[0];
+    return first?.product ? String(first.product) : "";
+  }, [items]);
+
+  const isProductLocked = Boolean(lockedProductId);
+
+  // Solo mostrar el producto bloqueado cuando ya hay partidas.
+  // Si estás editando una partida legacy con otro producto, lo incluimos SOLO para que el select lo muestre.
+  const filteredProducts = useMemo(() => {
+    if (!lockedProductId) return products;
+    const base = (products || []).filter((p) => String(p.id) === lockedProductId);
+
+    if (form.product && String(form.product) !== lockedProductId) {
+      const extra = (products || []).find((p) => String(p.id) === String(form.product));
+      if (extra && !base.some((x) => String(x.id) === String(extra.id))) return [...base, extra];
+    }
+    return base;
+  }, [products, lockedProductId, form.product]);
+
   // ✅ Cancelar + Camino 2 rollback
   const handleCancelToList = async () => {
     if (busyItemOp || busySave || busyRealAmount) {
@@ -733,6 +758,47 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     setForm((prev) => autoFillTotalIfPossible({ ...prev, ...patch }));
   };
 
+  /* ✅ [LICIT] Prefill/Unlock del producto cuando hay/ya no hay partidas */
+  useEffect(() => {
+    if (step !== 2) return;
+
+    // Si ya hay partidas, el producto queda fijo para nuevas capturas
+    if (lockedProductId) {
+      const editingExisting = isRealId(form.id);
+      if (!editingExisting && String(form.product || "") !== lockedProductId) {
+        setFormPatched({
+          product: lockedProductId,
+          description: "",
+          manual_description: "",
+          estimated_unit_cost: "",
+          estimated_total: "",
+          quantity: "",
+          unit: "",
+        });
+      }
+      return;
+    }
+
+    // Si ya no hay partidas (se borraron todas), se desbloquea y limpiamos el form
+    if ((items || []).length === 0) {
+      const editingExisting = isRealId(form.id);
+      if (!editingExisting && (form.product || "")) {
+        setForm({
+          _cid: null,
+          id: null,
+          product: "",
+          quantity: "",
+          unit: "",
+          description: "",
+          manual_description: "",
+          estimated_unit_cost: "",
+          estimated_total: "",
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, lockedProductId, items]);
+
   // ✅ Handler para descripción de catálogo: setea costo del catálogo + recalcula total
   const handleDescriptionChange = (descId) => {
     if (manualItemsMode) return;
@@ -782,6 +848,12 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       manual_description,
       estimated_unit_cost,
     } = form;
+
+    // [LICIT] En alta nueva (POST), forzar el producto bloqueado si ya existe
+    if (!isRealId(id) && lockedProductId && String(product || "") !== lockedProductId) {
+      alert("Esta requisición ya tiene partidas. El Objeto del Gasto debe coincidir con la 1ª partida.");
+      return;
+    }
 
     // Validación base
     if (!product || !quantity || !unit) {
@@ -1502,6 +1574,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <select
                     className="w-full border rounded px-2 py-1"
                     value={form.product}
+                    disabled={isProductLocked}
+                    title={isProductLocked ? "El Objeto del Gasto queda fijo a partir de la 1ª partida." : ""}
                     onChange={(e) =>
                       setFormPatched({
                         product: e.target.value,
@@ -1514,8 +1588,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       })
                     }
                   >
-                    <option value="">— Selecciona —</option>
-                    {products.map((p) => (
+                    <option value="">
+                      {isProductLocked ? "Objeto del Gasto fijo (por 1ª partida)" : "— Selecciona —"}
+                    </option>
+                    {filteredProducts.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.description}
                       </option>
@@ -2002,10 +2078,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               <select
                 className="w-full border rounded px-2 py-1"
                 value={catalogModalProduct}
+                disabled={isProductLocked}
+                title={isProductLocked ? "El Objeto del Gasto queda fijo a partir de la 1ª partida." : ""}
                 onChange={(e) => setCatalogModalProduct(e.target.value)}
               >
-                <option value="">— Selecciona —</option>
-                {products.map((p) => (
+                <option value="">
+                  {isProductLocked ? "Objeto del Gasto fijo (por 1ª partida)" : "— Selecciona —"}
+                </option>
+                {filteredProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.description}
                   </option>
@@ -2061,10 +2141,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
               <select
                 className="w-full border rounded px-2 py-1"
                 value={registerForm.product}
+                disabled={isProductLocked}
+                title={isProductLocked ? "El Objeto del Gasto queda fijo a partir de la 1ª partida." : ""}
                 onChange={(e) => setRegisterForm((f) => ({ ...f, product: e.target.value }))}
               >
-                <option value="">— Selecciona —</option>
-                {products.map((p) => (
+                <option value="">
+                  {isProductLocked ? "Objeto del Gasto fijo (por 1ª partida)" : "— Selecciona —"}
+                </option>
+                {filteredProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.description}
                   </option>

@@ -223,6 +223,79 @@ export default function RequisitionItems({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualItemsMode]);
 
+  /* ────────────────────────────────────────────────────────────────
+     [LICIT] LOCK: todas las partidas deben compartir el mismo product
+     - Si hay items: se bloquea al product del 1er item
+     - Si no hay items: se desbloquea
+  ──────────────────────────────────────────────────────────────── */
+  const lockedProductId = useMemo(() => {
+    const first = (items || [])[0];
+    return first?.product ? String(first.product) : '';
+  }, [items]);
+
+  const isProductLocked = Boolean(lockedProductId);
+
+  const filteredProducts = useMemo(() => {
+    if (!lockedProductId) return products;
+    return products.filter((p) => String(p.id) === lockedProductId);
+  }, [products, lockedProductId]);
+
+  // ✅ Cuando se bloquea (después de agregar la 1a partida), preselecciona product fijo
+  useEffect(() => {
+    if (!lockedProductId) return;
+
+    const lockedLabel = productLabelById.get(lockedProductId) || '';
+
+    setNewItem((prev) => {
+      if (String(prev.product) === lockedProductId) return prev;
+
+      return {
+        ...prev,
+        product: lockedProductId,
+        product_label: lockedLabel,
+
+        // limpiar dependencias para capturar siguiente partida
+        description: '',
+        description_label: '',
+        manual_description: '',
+        estimated_unit_cost: '',
+        estimated_total: '',
+        quantity: '',
+        unit: '',
+        unit_label: '',
+      };
+    });
+
+    if (!manualItemsMode) loadDescriptionsByProduct(lockedProductId);
+    else setDescOptions([]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedProductId, manualItemsMode, productLabelById]);
+
+  // ✅ Cuando se desbloquea (se borraron TODAS las partidas), limpia selección
+  useEffect(() => {
+    if (isProductLocked) return;
+    if ((items || []).length !== 0) return;
+
+    setNewItem((prev) => {
+      if (!prev.product && !prev.product_label) return prev;
+      return {
+        ...prev,
+        product: '',
+        product_label: '',
+        description: '',
+        description_label: '',
+        manual_description: '',
+        estimated_unit_cost: '',
+        estimated_total: '',
+        quantity: '',
+        unit: '',
+        unit_label: '',
+      };
+    });
+    setDescOptions([]);
+  }, [isProductLocked, items]);
+
   const handleDescriptionChange = (descId) => {
     if (manualItemsMode) return;
 
@@ -270,7 +343,7 @@ export default function RequisitionItems({
         unit: newItem.unit,
         unit_label: newItem.unit_label,
 
-        description: null, // ✅ manual => null
+        description: null,
         manual_description: newItem.manual_description.trim(),
         description_label: newItem.manual_description.trim(),
 
@@ -294,7 +367,7 @@ export default function RequisitionItems({
       return;
     }
 
-    // modo catálogo (actual)
+    // modo catálogo
     if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
 
     if (!Number.isFinite(unitCost) || unitCost <= 0) {
@@ -585,23 +658,6 @@ export default function RequisitionItems({
     return pages;
   }, [currentPage, totalPages]);
 
-  // ✅ Handlers LIMPIOS
-  const handleOpenCatalog = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openCatalog();
-  };
-
-  const handleOpenRegistro = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openRegistro();
-  };
-
-  const handleToggleAckCostRealistic = (e) => {
-    setAckCostRealistic(e.target.checked);
-  };
-
   const baseEnabled = manualItemsMode ? !!newItem.product : !!newItem.description;
 
   // ✅ Para el warning: unidad seleccionada (si ya hay)
@@ -638,7 +694,6 @@ export default function RequisitionItems({
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
 
-      {/* ✅ WARNING solo en modo manual */}
       {manualItemsMode ? <ManualUomWarning unitLabel={currentUnitLabel} /> : null}
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end mb-3">
@@ -647,6 +702,7 @@ export default function RequisitionItems({
           <label className="block mb-1 font-medium">Objeto del Gasto</label>
           <select
             value={newItem.product}
+            disabled={isProductLocked}
             onChange={(e) => {
               const id = e.target.value;
               const label = e.target.options[e.target.selectedIndex]?.text || '';
@@ -667,10 +723,13 @@ export default function RequisitionItems({
               if (!manualItemsMode) loadDescriptionsByProduct(id);
               else setDescOptions([]);
             }}
-            className="border p-2 w-full rounded"
+            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
+            title={isProductLocked ? 'El Objeto del Gasto queda fijo a partir de la 1ª partida.' : ''}
           >
-            <option value="">Seleccione Objeto del Gasto</option>
-            {products.map((o) => (
+            <option value="">
+              {isProductLocked ? 'Objeto del Gasto fijo (por 1ª partida)' : 'Seleccione Objeto del Gasto'}
+            </option>
+            {filteredProducts.map((o) => (
               <option key={o.id} value={o.id}>{o.label}</option>
             ))}
           </select>
