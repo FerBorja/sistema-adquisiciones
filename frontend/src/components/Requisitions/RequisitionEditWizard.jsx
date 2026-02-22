@@ -9,7 +9,7 @@ import RequisitionQuotesPanel from "./RequisitionQuotesPanel";
 const LIST_ROUTE = "/requisitions";
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Step 1 catalog endpoints: try multiple candidates until one works.
+   Step 1 catalog endpoints: try múltiples candidatos hasta que uno funcione.
    NOTE: administrative_unit NO es catálogo (es CharField editable=False en backend),
    así que no debe pedirse aquí.
 ---------------------------------------------------------------------------- */
@@ -124,11 +124,22 @@ function getDescTextFromCache(descCache, productId, descId) {
   return found?.text || "";
 }
 
-/** ✅ Prefer backend bonito si existe; si no, usa cache/fallback */
+/** ✅ Prefer backend bonito si existe; si no, usa cache/fallback; soporta manual_description */
 function getNiceDescDisplay({ row, descCache }) {
   if (row?.description_display) return row.description_display;
-  if (row?.description_text) return `${row.description_text} (ID: ${row.description})`;
 
+  // Si backend manda description_text:
+  if (row?.description_text) {
+    // si hay id de descripción, muéstralo con ID
+    if (row?.description) return `${row.description_text} (ID: ${row.description})`;
+    // si no hay id (manual), solo texto
+    return row.description_text;
+  }
+
+  // Manual fallback
+  if (row?.manual_description) return String(row.manual_description);
+
+  // Cache fallback (catálogo)
   const txt = getDescTextFromCache(descCache, row?.product, row?.description);
   if (txt) return `${txt} (ID: ${row.description})`;
 
@@ -305,6 +316,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     quantity: "",
     unit: "",
     description: "",
+    manual_description: "",
     estimated_unit_cost: "",
     estimated_total: "",
   });
@@ -363,6 +375,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     setRealAmountReason("");
     setRealAmountPendingDelta((prev) => prev + d);
   };
+
+  // ✅ Manual mode detectado por tender label (NO APLICA)
+  const manualItemsMode = useMemo(() => {
+    const tenderLabel =
+      labelFrom(catalogs?.tender || [], headerForm.tender, (r) => r.name ?? r.description ?? "") || "";
+    return String(tenderLabel).toUpperCase().includes("NO APLICA");
+  }, [catalogs, headerForm.tender]);
 
   // ✅ Cancelar + Camino 2 rollback
   const handleCancelToList = async () => {
@@ -475,9 +494,14 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         product: coerceId(it.product),
         quantity: Number(it.quantity ?? 0),
         unit: coerceId(it.unit),
-        description: coerceId(it.description),
+
+        // ✅ manual support
+        description: coerceId(it.description), // puede ser "" si null
+        manual_description: it.manual_description || "",
+
         description_text: it.description_text || "",
         description_display: it.description_display || "",
+
         estimated_unit_cost:
           it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
             ? ""
@@ -581,13 +605,19 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     };
   }, [step]);
 
-  // ✅ al cambiar producto del formulario: cargar descOptions y cachearlas
+  // ✅ al cambiar producto del formulario: cargar descOptions y cachearlas (solo si NO es manual)
   useEffect(() => {
+    if (manualItemsMode) {
+      setDescOptions([]);
+      return;
+    }
+
     const pid = form.product;
     if (!pid) {
       setDescOptions([]);
       return;
     }
+
     let cancelled = false;
     async function run() {
       try {
@@ -605,11 +635,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [form.product]);
+  }, [form.product, manualItemsMode]);
 
-  // ✅ precargar descripciones para TODOS los productos que estén en items
+  // ✅ precargar descripciones para TODOS los productos que estén en items (solo si NO es manual)
   useEffect(() => {
+    if (manualItemsMode) return;
     if (step !== 2) return;
+
     const productIds = Array.from(new Set((items || []).map((it) => String(it.product)).filter(Boolean)));
     const missing = productIds.filter((pid) => !descCache?.[pid]);
     if (missing.length === 0) return;
@@ -639,7 +671,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [step, items, descCache]);
+  }, [step, items, descCache, manualItemsMode]);
 
   const goNext = () => setStep((s) => Math.min(2, s + 1));
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
@@ -659,8 +691,10 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     setForm((prev) => autoFillTotalIfPossible({ ...prev, ...patch }));
   };
 
-  // ✅ Handler para descripción: setea costo del catálogo + recalcula total
+  // ✅ Handler para descripción de catálogo: setea costo del catálogo + recalcula total
   const handleDescriptionChange = (descId) => {
+    if (manualItemsMode) return;
+
     const selected = (descOptions || []).find((d) => String(d.id) === String(descId));
     const cost = selected?.estimated_unit_cost;
 
@@ -672,6 +706,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   // ✅ Refuerzo: si ya hay descripción y llegan descOptions, sincronizamos costo con catálogo
   useEffect(() => {
+    if (manualItemsMode) return;
+
     const did = form.description;
     if (!did) return;
 
@@ -689,16 +725,35 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       return autoFillTotalIfPossible({ ...prev, estimated_unit_cost: nextStr });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.description, descOptions]);
+  }, [form.description, descOptions, manualItemsMode]);
 
-  // ✅ B) addOrUpdateItem → POST/PATCH a items anidados
+  // ✅ B) addOrUpdateItem → POST/PATCH a items anidados (soporta manual)
   const addOrUpdateItem = async (e) => {
     e.preventDefault();
 
-    const { id, product, quantity, unit, description, estimated_unit_cost } = form;
+    const {
+      id,
+      product,
+      quantity,
+      unit,
+      description,
+      manual_description,
+      estimated_unit_cost,
+    } = form;
 
-    if (!product || !description || !quantity || !unit) {
-      alert("Completa Objeto del Gasto, Descripción, Cantidad y Unidad.");
+    // Validación base
+    if (!product || !quantity || !unit) {
+      alert("Completa Objeto del Gasto, Cantidad y Unidad.");
+      return;
+    }
+
+    if (!manualItemsMode && !description) {
+      alert("Completa Descripción (catálogo).");
+      return;
+    }
+
+    if (manualItemsMode && !String(manual_description || "").trim()) {
+      alert("Completa Descripción (manual).");
       return;
     }
 
@@ -710,7 +765,11 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const unitCostNum = Number(estimated_unit_cost);
     if (!Number.isFinite(unitCostNum) || unitCostNum <= 0) {
-      alert("El Costo unitario (desde catálogo) es obligatorio y debe ser mayor a 0.");
+      alert(
+        manualItemsMode
+          ? "El Costo unitario es obligatorio y debe ser mayor a 0."
+          : "El Costo unitario (desde catálogo) es obligatorio y debe ser mayor a 0."
+      );
       return;
     }
 
@@ -721,17 +780,35 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       product: Number(product),
       quantity: qty,
       unit: Number(unit),
-      description: Number(description),
       estimated_unit_cost: Number(unitCostNum.toFixed(2)),
       estimated_total: totalNum,
+
+      ...(manualItemsMode
+        ? {
+            description: null,
+            manual_description: String(manual_description || "").trim(),
+          }
+        : {
+            description: Number(description),
+            manual_description: null,
+          }),
     };
 
     // UI local
-    const selected = (descOptions || []).find((d) => String(d.id) === String(description));
-    const descTextLocal = selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
-    const descDisplayLocal = descTextLocal
-      ? `${descTextLocal} (ID: ${Number(description)})`
-      : `ID: ${Number(description)}`;
+    let descTextLocal = "";
+    let descDisplayLocal = "";
+
+    if (manualItemsMode) {
+      descTextLocal = String(manual_description || "").trim();
+      descDisplayLocal = descTextLocal;
+    } else {
+      const selected = (descOptions || []).find((d) => String(d.id) === String(description));
+      descTextLocal =
+        selected?.text || getDescTextFromCache(descCache, Number(product), Number(description)) || "";
+      descDisplayLocal = descTextLocal
+        ? `${descTextLocal} (ID: ${Number(description)})`
+        : `ID: ${Number(description)}`;
+    }
 
     setBusyItemOp(true);
     try {
@@ -757,6 +834,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   _cid: String(updated.id),
                   id: updated.id,
                   ...payload,
+
+                  // refrescar campos de texto si vienen del backend
+                  manual_description: updated.manual_description ?? payload.manual_description ?? "",
                   description_text: updated.description_text || descTextLocal,
                   description_display: updated.description_display || descDisplayLocal,
                 }
@@ -783,6 +863,8 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             _cid: String(created.id),
             id: created.id,
             ...payload,
+
+            manual_description: created.manual_description ?? payload.manual_description ?? "",
             description_text: created.description_text || descTextLocal,
             description_display: created.description_display || descDisplayLocal,
           },
@@ -799,6 +881,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         quantity: "",
         unit: "",
         description: "",
+        manual_description: "",
         estimated_unit_cost: "",
         estimated_total: "",
       });
@@ -821,6 +904,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         quantity: String(row.quantity || ""),
         unit: String(row.unit || ""),
         description: String(row.description || ""),
+        manual_description: String(row.manual_description || ""),
         estimated_unit_cost: row.estimated_unit_cost === "" ? "" : String(row.estimated_unit_cost ?? ""),
         estimated_total: row.estimated_total === "" ? "" : String(row.estimated_total ?? ""),
       })
@@ -839,7 +923,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     try {
       if (isRealId(realId)) {
         await apiClient.delete(`/requisitions/${requisition.id}/items/${Number(realId)}/`);
-        // si era creado en sesión, quítalo del set
         createdItemIdsThisSessionRef.current.delete(Number(realId));
       }
 
@@ -861,6 +944,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
           quantity: "",
           unit: "",
           description: "",
+          manual_description: "",
           estimated_unit_cost: "",
           estimated_total: "",
         });
@@ -875,19 +959,19 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
   };
 
   const openClassifier = () => {
-    console.log("[Wizard] openClassifier()");
     window.open("/docs/clasificador.pdf", "_blank", "noopener");
   };
 
-  /* ──────────────── “Ver Catálogo” modal behaviors ──────────────────────── */
+  /* ──────────────── “Ver Catálogo” modal behaviors (solo catálogo) ──────────────────────── */
   const openCatalogModal = () => {
-    console.log("[Wizard] openCatalogModal()");
+    if (manualItemsMode) return;
     setCatalogModalProduct(form.product || "");
     setCatalogModalDescs([]);
     setShowCatalogModal(true);
   };
 
   useEffect(() => {
+    if (manualItemsMode) return;
     if (!showCatalogModal) return;
     if (!catalogModalProduct) {
       setCatalogModalDescs([]);
@@ -910,17 +994,18 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
     return () => {
       cancelled = true;
     };
-  }, [showCatalogModal, catalogModalProduct]);
+  }, [showCatalogModal, catalogModalProduct, manualItemsMode]);
 
-  /* ───────────────── “Registrar” (nuevo ItemDescription) ─────────────────── */
+  /* ───────────────── “Registrar” (nuevo ItemDescription) (solo catálogo) ─────────────────── */
   const openRegisterModal = () => {
-    console.log("[Wizard] openRegisterModal()");
+    if (manualItemsMode) return;
     setRegisterForm({ product: form.product || "", text: "", estimated_unit_cost: "" });
     setShowRegisterModal(true);
   };
 
   const submitRegister = async (e) => {
     e.preventDefault();
+    if (manualItemsMode) return;
 
     if (!registerForm.product || !registerForm.text.trim()) {
       alert("Selecciona Objeto del Gasto y escribe la descripción.");
@@ -963,6 +1048,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       setFormPatched({
         product: String(registerForm.product),
         description: String(resp.data?.id ?? ""),
+        manual_description: "",
         estimated_unit_cost: String(resp.data?.estimated_unit_cost ?? payload.estimated_unit_cost ?? ""),
       });
 
@@ -1025,7 +1111,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
     const updated = result.data;
 
-    // ✅ REHIDRATACIÓN (igual que tu lógica)
+    // ✅ REHIDRATACIÓN
     try {
       setHeaderForm((prev) => ({
         ...prev,
@@ -1050,9 +1136,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
             product: coerceId(it.product),
             quantity: Number(it.quantity ?? 0),
             unit: coerceId(it.unit),
+
             description: coerceId(it.description),
+            manual_description: it.manual_description || "",
+
             description_text: it.description_text || "",
             description_display: it.description_display || "",
+
             estimated_unit_cost:
               it.estimated_unit_cost === null || typeof it.estimated_unit_cost === "undefined"
                 ? ""
@@ -1129,7 +1219,6 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         return;
       }
 
-      // ✅ Mantienes tu bloqueo actual
       if (quoteDraftInvalid) {
         window.alert(
           "Tienes una cotización seleccionada pero sin partidas marcadas.\n\n" +
@@ -1226,6 +1315,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
 
   if (!requisition) return <LoadingSpinner />;
 
+  // habilitar inputs del paso 2
+  const baseEnabled = manualItemsMode ? !!form.product : !!form.description;
+
   return (
     <div className="max-w-5xl mx-auto">
       {/* Banner */}
@@ -1305,11 +1397,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   <strong>Monto real</strong>: {fmtMoney(requisition.real_amount)}
                 </div>
                 <div className="text-[11px] text-gray-500 mt-1">
-                  {loadingMe
-                    ? "Verificando permisos..."
-                    : adminLike
-                      ? "Admins pueden capturarlo en Paso 2."
-                      : "Solo admins pueden capturarlo."}
+                  {loadingMe ? "Verificando permisos..." : adminLike ? "Admins pueden capturarlo en Paso 2." : "Solo admins pueden capturarlo."}
                 </div>
               </div>
             </div>
@@ -1373,6 +1461,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       setFormPatched({
                         product: e.target.value,
                         description: "",
+                        manual_description: "",
                         estimated_unit_cost: "",
                         estimated_total: "",
                         quantity: "",
@@ -1392,20 +1481,31 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                 {/* Descripción */}
                 <div className="md:col-span-8">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Descripción</label>
-                  <select
-                    className="w-full border rounded px-2 py-1"
-                    value={form.description}
-                    onChange={(e) => handleDescriptionChange(e.target.value)}
-                    disabled={!form.product}
-                  >
-                    <option value="">{form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}</option>
-                    {descOptions.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.text}
-                        {d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ""}
-                      </option>
-                    ))}
-                  </select>
+
+                  {manualItemsMode ? (
+                    <input
+                      className="w-full border rounded px-2 py-1"
+                      value={form.manual_description}
+                      onChange={(e) => setFormPatched({ manual_description: e.target.value })}
+                      disabled={!form.product}
+                      placeholder={form.product ? "Escribe la descripción (manual)" : "Selecciona Objeto del Gasto primero"}
+                    />
+                  ) : (
+                    <select
+                      className="w-full border rounded px-2 py-1"
+                      value={form.description}
+                      onChange={(e) => handleDescriptionChange(e.target.value)}
+                      disabled={!form.product}
+                    >
+                      <option value="">{form.product ? "— Selecciona —" : "Selecciona Objeto del Gasto primero"}</option>
+                      {descOptions.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.text}
+                          {d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {/* Cantidad */}
@@ -1417,7 +1517,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     className="w-full border rounded px-2 py-1"
                     value={form.quantity}
                     onChange={(e) => setFormPatched({ quantity: e.target.value })}
-                    disabled={!form.description}
+                    disabled={!baseEnabled}
                   />
                 </div>
 
@@ -1428,7 +1528,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                     className="w-full border rounded px-2 py-1"
                     value={form.unit}
                     onChange={(e) => setFormPatched({ unit: e.target.value })}
-                    disabled={!form.description}
+                    disabled={!baseEnabled}
                   >
                     <option value="">— Selecciona —</option>
                     {units.map((u) => (
@@ -1439,20 +1539,26 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                   </select>
                 </div>
 
-                {/* Costo unitario (READONLY) */}
+                {/* Costo unitario */}
                 <div className="md:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">Costo unitario</label>
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    className="w-full border rounded px-2 py-1 bg-gray-100"
+                    className={`w-full border rounded px-2 py-1 ${manualItemsMode ? "" : "bg-gray-100"}`}
                     value={form.estimated_unit_cost}
-                    readOnly
+                    readOnly={!manualItemsMode}
+                    disabled={!baseEnabled}
+                    onChange={(e) => {
+                      if (!manualItemsMode) return;
+                      setFormPatched({ estimated_unit_cost: e.target.value });
+                    }}
                     placeholder="0.00"
-                    disabled={!form.description}
                   />
-                  <div className="text-[11px] text-gray-500 mt-1">Se llena automáticamente desde la descripción.</div>
+                  <div className="text-[11px] text-gray-500 mt-1">
+                    {manualItemsMode ? "Captura manualmente el costo unitario." : "Se llena automáticamente desde la descripción."}
+                  </div>
                 </div>
 
                 {/* Total (READONLY) */}
@@ -1490,6 +1596,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                           quantity: "",
                           unit: "",
                           description: "",
+                          manual_description: "",
                           estimated_unit_cost: "",
                           estimated_total: "",
                         })
@@ -1513,29 +1620,33 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
                       Clasificador
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openCatalogModal();
-                      }}
-                      className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
-                    >
-                      Ver Catálogo
-                    </button>
+                    {!manualItemsMode && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openCatalogModal();
+                          }}
+                          className="px-3 py-2 rounded bg-slate-200 hover:bg-slate-300"
+                        >
+                          Ver Catálogo
+                        </button>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openRegisterModal();
-                      }}
-                      className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
-                    >
-                      Registrar
-                    </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            openRegisterModal();
+                          }}
+                          className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          Registrar
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               </form>
@@ -1835,7 +1946,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       )}
 
       {/* ───────────── Modals ───────────── */}
-      {showCatalogModal && (
+      {showCatalogModal && !manualItemsMode && (
         <Modal onClose={() => setShowCatalogModal(false)} title="Catálogo de Descripciones">
           <div className="space-y-3">
             <div>
@@ -1894,7 +2005,7 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
         </Modal>
       )}
 
-      {showRegisterModal && (
+      {showRegisterModal && !manualItemsMode && (
         <Modal onClose={() => setShowRegisterModal(false)} title="Registrar Descripción">
           <form onSubmit={submitRegister} className="space-y-3">
             <div>

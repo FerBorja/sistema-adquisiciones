@@ -210,7 +210,21 @@ class RequisitionItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.PROTECT)  # "Objeto del Gasto"
     quantity = models.PositiveIntegerField()
     unit = models.ForeignKey(UnitOfMeasurement, on_delete=models.PROTECT)
-    description = models.ForeignKey(ItemDescription, on_delete=models.PROTECT)
+
+    # ✅ CATÁLOGO (puede ser NULL cuando es captura manual)
+    description = models.ForeignKey(
+        ItemDescription,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
+
+    # ✅ NUEVO: descripción manual cuando tender = "- NO APLICA"
+    manual_description = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+    )
 
     # ✅ monto por renglón (obligatorio)
     estimated_total = models.DecimalField(
@@ -257,7 +271,16 @@ class RequisitionItem(models.Model):
         verbose_name_plural = "Requisition Items"
 
     def __str__(self):
-        return f"{self.product.description} ({self.quantity} {self.unit.name}) - {self.description.text}"
+        desc_txt = ""
+        try:
+            if getattr(self, "description_id", None) and getattr(self, "description", None):
+                desc_txt = self.description.text
+            else:
+                desc_txt = (self.manual_description or "").strip()
+        except Exception:
+            desc_txt = (self.manual_description or "").strip()
+        desc_txt = desc_txt or "—"
+        return f"{self.product.description} ({self.quantity} {self.unit.name}) - {desc_txt}"
 
 
 # =============================================================================

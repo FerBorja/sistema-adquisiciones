@@ -32,8 +32,15 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
     # ✅ IMPORTANTE: el parent fija requisition, no el cliente
     requisition = serializers.PrimaryKeyRelatedField(read_only=True)
 
-    # ✅ texto de descripción y display bonito
-    description_text = serializers.CharField(source="description.text", read_only=True)
+    # ✅ NUEVO: descripción manual (cuando no hay FK description)
+    manual_description = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
+
+    # ✅ texto de descripción y display bonito (soporta FK o manual)
+    description_text = serializers.SerializerMethodField(read_only=True)
     description_display = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -41,66 +48,137 @@ class RequisitionItemSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["requisition", "description_text", "description_display"]
 
+    def get_description_text(self, obj):
+        try:
+            if obj.description_id and getattr(obj, "description", None):
+                return obj.description.text
+        except Exception:
+            pass
+        return (getattr(obj, "manual_description", None) or "").strip()
+
     def get_description_display(self, obj):
-        if obj.description_id and getattr(obj, "description", None):
-            return f"{obj.description.text} (ID: {obj.description_id})"
-        return f"ID: {obj.description_id}" if obj.description_id else ""
+        try:
+            if obj.description_id and getattr(obj, "description", None):
+                return f"{obj.description.text} (ID: {obj.description_id})"
+        except Exception:
+            pass
+        md = (getattr(obj, "manual_description", None) or "").strip()
+        return md or ""
 
     def validate(self, attrs):
         """
         Candado de 'monto por renglón' (estimated_total):
         - Si viene estimated_total: validar > 0.
-        - Si NO viene: intentar calcularlo desde:
-            a) estimated_unit_cost (payload), o
-            b) description.estimated_unit_cost (catálogo)
-          y quantity.
+        - Si NO viene:
+            - En CREATE: intentar calcularlo desde:
+                a) estimated_unit_cost (payload), o
+                b) description.estimated_unit_cost (catálogo)
+              y quantity.
+            - En PATCH/UPDATE: si cambió quantity/description/estimated_unit_cost/manual_description,
+              recalcular; si no cambió, conservar el total actual.
+        Reglas nuevas:
+        - OBLIGATORIO: (description) OR (manual_description + estimated_unit_cost).
+        - Si hay description, manual_description se fuerza a None.
         """
-        qty = attrs.get("quantity")
-        est_total = attrs.get("estimated_total", None)
-        est_unit = attrs.get("estimated_unit_cost", None)
-        desc = attrs.get("description", None)
+        instance = getattr(self, "instance", None)
 
-        # Normalizar unit/total si vienen
-        if est_total is not None:
+        incoming_total = "estimated_total" in attrs
+        incoming_qty = "quantity" in attrs
+        incoming_unit = "estimated_unit_cost" in attrs
+        incoming_desc = "description" in attrs
+        incoming_manual = "manual_description" in attrs
+
+        qty = attrs.get("quantity", getattr(instance, "quantity", None) if instance else None)
+        est_total = attrs.get("estimated_total", getattr(instance, "estimated_total", None) if instance else None)
+        est_unit = attrs.get("estimated_unit_cost", getattr(instance, "estimated_unit_cost", None) if instance else None)
+        desc = attrs.get("description", getattr(instance, "description", None) if instance else None)
+        manual = attrs.get("manual_description", getattr(instance, "manual_description", None) if instance else None)
+
+        # --- Normalizar unit/total si vienen explícitos ---
+        if incoming_total and est_total is not None:
             est_total = _money2(est_total)
             attrs["estimated_total"] = est_total
 
-        if est_unit is not None:
+        if incoming_unit and est_unit is not None:
             est_unit = _money2(est_unit)
             attrs["estimated_unit_cost"] = est_unit
 
-        # --- Si estimated_total NO viene, intentamos calcularlo ---
-        if est_total is None:
-            # 1) unit cost desde payload si viene
-            unit_cost = est_unit
-
-            # 2) si no, unit cost desde catálogo (ItemDescription.estimated_unit_cost)
-            if unit_cost is None and desc is not None:
-                cat_cost = getattr(desc, "estimated_unit_cost", None)
-                if cat_cost is not None:
-                    unit_cost = _money2(cat_cost)
-                    attrs["estimated_unit_cost"] = unit_cost
-
-            # 3) calcular total si se puede
-            if unit_cost is not None and qty is not None:
-                total = _money2(unit_cost * Decimal(qty))
-                attrs["estimated_total"] = total
-            else:
+        # --- Regla principal: o catálogo o manual ---
+        if desc is None:
+            # Si el cliente manda manual_description con texto pero NO manda description, y
+            # el instance tiene description, exigimos que el cliente mande description=null explícito.
+            if incoming_manual and (manual or "").strip() and instance and getattr(instance, "description_id", None) and not incoming_desc:
                 raise ValidationError({
-                    "estimated_total": (
-                        "Este campo es obligatorio por renglón. "
-                        "Puedes enviarlo directamente o permitir que se calcule "
-                        "desde estimated_unit_cost o desde el costo del catálogo (ItemDescription.estimated_unit_cost)."
-                    )
+                    "description": "Para usar descripción manual debes enviar explícitamente description=null."
                 })
 
-        # --- Validación mínima: evitar 0 o negativos ---
+            if not (manual or "").strip():
+                raise ValidationError({
+                    "manual_description": "La descripción manual es obligatoria cuando no hay descripción de catálogo."
+                })
+            if est_unit is None:
+                raise ValidationError({
+                    "estimated_unit_cost": "El costo unitario es obligatorio cuando la descripción es manual."
+                })
+
+            # asegurar que el modelo quede sin FK
+            attrs["description"] = None
+
+        else:
+            # Si hay catálogo, evita mezclar ambas
+            attrs["manual_description"] = None
+
+        # --- Validaciones mínimas: evitar 0 o negativos ---
+        # unitario (si existe) debe ser > 0
+        if est_unit is not None and _money2(est_unit) <= Decimal("0.00"):
+            raise ValidationError({"estimated_unit_cost": "Debe ser mayor a 0."})
+
+        # total (si existe) debe ser > 0
+        if incoming_total:
+            if attrs.get("estimated_total") is None:
+                raise ValidationError({"estimated_total": "Este campo no puede ser null."})
+            if attrs["estimated_total"] <= Decimal("0.00"):
+                raise ValidationError({"estimated_total": "Debe ser mayor a 0."})
+
+        # --- Si estimated_total NO viene, decidir calcular o conservar ---
+        need_recalc = (instance is None) or incoming_qty or incoming_unit or incoming_desc or incoming_manual
+
+        if not incoming_total:
+            if need_recalc:
+                # 1) unit cost desde payload si viene o ya existe (manual exige est_unit)
+                unit_cost = est_unit
+
+                # 2) si no hay unitario y hay catálogo, tomar de catálogo
+                if unit_cost is None and desc is not None:
+                    cat_cost = getattr(desc, "estimated_unit_cost", None)
+                    if cat_cost is not None:
+                        unit_cost = _money2(cat_cost)
+                        attrs["estimated_unit_cost"] = unit_cost
+
+                # 3) calcular total si se puede
+                if unit_cost is not None and qty is not None:
+                    total = _money2(unit_cost * Decimal(qty))
+                    attrs["estimated_total"] = total
+                else:
+                    # Si no se puede calcular pero el instance ya tenía total válido, lo conservamos
+                    if instance is not None and getattr(instance, "estimated_total", None) is not None and not (incoming_qty or incoming_unit or incoming_desc or incoming_manual):
+                        attrs["estimated_total"] = _money2(getattr(instance, "estimated_total"))
+                    else:
+                        raise ValidationError({
+                            "estimated_total": (
+                                "Este campo es obligatorio por renglón. "
+                                "Puedes enviarlo directamente o permitir que se calcule "
+                                "desde estimated_unit_cost o desde el costo del catálogo (ItemDescription.estimated_unit_cost)."
+                            )
+                        })
+            else:
+                # no cambios relevantes, conservar
+                if est_total is not None:
+                    attrs["estimated_total"] = _money2(est_total)
+
+        # --- Validación final de total ---
         if attrs.get("estimated_total") is not None and attrs["estimated_total"] <= Decimal("0.00"):
             raise ValidationError({"estimated_total": "Debe ser mayor a 0."})
-
-        # Opcional: si viene unitario, evitar 0 o negativos
-        if attrs.get("estimated_unit_cost") is not None and attrs["estimated_unit_cost"] <= Decimal("0.00"):
-            raise ValidationError({"estimated_unit_cost": "Debe ser mayor a 0."})
 
         return attrs
 

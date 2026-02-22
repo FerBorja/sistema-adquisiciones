@@ -8,6 +8,9 @@ export default function RequisitionItems({
   items, setItems,
   requisitionNumber, setRequisitionNumber,
 
+  // ✅ modo manual si tender = "- NO APLICA"
+  manualItemsMode = false,
+
   // ✅ viene del padre (create wizard)
   ackCostRealistic = false,
   setAckCostRealistic = () => {},
@@ -87,6 +90,11 @@ export default function RequisitionItems({
   }, [products]);
 
   const loadDescriptionsByProduct = async (productId) => {
+    if (manualItemsMode) {
+      setDescOptions([]);
+      return;
+    }
+
     if (!productId) {
       setDescOptions([]);
       return;
@@ -151,13 +159,38 @@ export default function RequisitionItems({
     quantity: '',
     unit: '',
     unit_label: '',
+
+    // catálogo:
     description: '',
     description_label: '',
+
+    // manual:
+    manual_description: '',
+
     estimated_unit_cost: '',
     estimated_total: '',
   });
 
+  // ✅ si el modo cambia, limpia campos que ya no aplican
+  useEffect(() => {
+    setNewItem((p) => ({
+      ...p,
+      description: '',
+      description_label: '',
+      manual_description: '',
+      estimated_unit_cost: '',
+      estimated_total: '',
+      quantity: '',
+      unit: '',
+      unit_label: '',
+    }));
+    setDescOptions([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualItemsMode]);
+
   const handleDescriptionChange = (descId) => {
+    if (manualItemsMode) return;
+
     const selected = (descOptions || []).find((d) => String(d.id) === String(descId));
     const cost = selected?.estimated_unit_cost;
 
@@ -179,9 +212,55 @@ export default function RequisitionItems({
     const unitCost = Number(newItem.estimated_unit_cost);
 
     if (!newItem.product) return showToast('Selecciona el Objeto del Gasto (Producto).', 'error');
-    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
     if (!Number.isFinite(qty) || qty <= 0) return showToast('La cantidad debe ser mayor que 0.', 'error');
     if (!newItem.unit) return showToast('Selecciona la Unidad de Medida.', 'error');
+
+    if (manualItemsMode) {
+      if (!newItem.manual_description.trim()) return showToast('Captura la Descripción (manual).', 'error');
+
+      if (!Number.isFinite(unitCost) || unitCost <= 0) {
+        return showToast('El costo unitario es obligatorio y debe ser mayor que 0.', 'error');
+      }
+
+      const totalNum = Number((qty * unitCost).toFixed(2));
+      if (!Number.isFinite(totalNum) || totalNum <= 0) {
+        return showToast('No se pudo calcular el total (cantidad × unitario).', 'error');
+      }
+
+      const partida = {
+        id: Date.now(),
+        product: newItem.product,
+        product_label: newItem.product_label,
+        quantity: qty,
+        unit: newItem.unit,
+        unit_label: newItem.unit_label,
+
+        description: null, // ✅ manual => null
+        manual_description: newItem.manual_description.trim(),
+        description_label: newItem.manual_description.trim(),
+
+        estimated_unit_cost: Number(unitCost.toFixed(2)),
+        estimated_total: totalNum,
+      };
+
+      setItems((prev) => [...prev, partida]);
+
+      setNewItem({
+        product: '', product_label: '',
+        quantity: '',
+        unit: '', unit_label: '',
+        description: '', description_label: '',
+        manual_description: '',
+        estimated_unit_cost: '',
+        estimated_total: '',
+      });
+
+      setDescOptions([]);
+      return;
+    }
+
+    // modo catálogo (actual)
+    if (!newItem.description) return showToast('Selecciona la Descripción.', 'error');
 
     if (!Number.isFinite(unitCost) || unitCost <= 0) {
       return showToast('El costo unitario (desde la descripción) es obligatorio y debe ser mayor que 0.', 'error');
@@ -201,6 +280,7 @@ export default function RequisitionItems({
       unit_label: newItem.unit_label,
       description: newItem.description,
       description_label: newItem.description_label,
+      manual_description: null,
       estimated_unit_cost: Number(unitCost.toFixed(2)),
       estimated_total: totalNum,
     };
@@ -212,6 +292,7 @@ export default function RequisitionItems({
       quantity: '',
       unit: '', unit_label: '',
       description: '', description_label: '',
+      manual_description: '',
       estimated_unit_cost: '',
       estimated_total: '',
     });
@@ -264,7 +345,7 @@ export default function RequisitionItems({
     }
   }, [setRequisitionNumber]);
 
-  // ======= Registro modal =======
+  // ======= Registro modal (solo catálogo) =======
   const [showRegistroModal, setShowRegistroModal] = useState(false);
   const [regProductId, setRegProductId] = useState('');
   const [regDescripcion, setRegDescripcion] = useState('');
@@ -278,6 +359,7 @@ export default function RequisitionItems({
   };
 
   const openRegistro = () => {
+    if (manualItemsMode) return;
     setRegError(null);
     setShowRegistroModal(true);
     if (newItem.product) setRegProductId(newItem.product);
@@ -305,6 +387,8 @@ export default function RequisitionItems({
   };
 
   const submitRegistro = async () => {
+    if (manualItemsMode) return;
+
     setRegError(null);
     if (!regProductId) return setRegError("Selecciona un 'Objeto del Gasto'.");
     if (!regDescripcion.trim()) return setRegError("La 'Descripción del Producto' no puede estar vacía.");
@@ -367,7 +451,7 @@ export default function RequisitionItems({
     }
   };
 
-  // ======= Catálogo modal =======
+  // ======= Catálogo modal (solo catálogo) =======
   const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState(null);
@@ -378,6 +462,8 @@ export default function RequisitionItems({
   const [page, setPage] = useState(1);
 
   const openCatalog = async () => {
+    if (manualItemsMode) return;
+
     setShowCatalogModal(true);
     setCatalogError(null);
     setSearchQuery('');
@@ -481,6 +567,8 @@ export default function RequisitionItems({
     setAckCostRealistic(e.target.checked);
   };
 
+  const baseEnabled = manualItemsMode ? !!newItem.product : !!newItem.description;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
@@ -507,7 +595,6 @@ export default function RequisitionItems({
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
 
-      {/* ✅ NUEVO ORDEN + unitario/total READONLY */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end mb-3">
         {/* Objeto del Gasto */}
         <div className="md:col-span-4">
@@ -523,13 +610,16 @@ export default function RequisitionItems({
                 product_label: label,
                 description: '',
                 description_label: '',
+                manual_description: '',
                 estimated_unit_cost: '',
                 estimated_total: '',
                 quantity: '',
                 unit: '',
                 unit_label: '',
               }));
-              loadDescriptionsByProduct(id);
+
+              if (!manualItemsMode) loadDescriptionsByProduct(id);
+              else setDescOptions([]);
             }}
             className="border p-2 w-full rounded"
           >
@@ -543,19 +633,30 @@ export default function RequisitionItems({
         {/* Descripción */}
         <div className="md:col-span-8">
           <label className="block mb-1 font-medium">Descripción</label>
-          <select
-            value={newItem.description}
-            onChange={(e) => handleDescriptionChange(e.target.value)}
-            disabled={!newItem.product}
-            className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
-          >
-            <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
-            {descOptions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.text}{d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ''}
-              </option>
-            ))}
-          </select>
+
+          {manualItemsMode ? (
+            <input
+              value={newItem.manual_description}
+              onChange={(e) => setNewItem((p) => ({ ...p, manual_description: e.target.value }))}
+              disabled={!newItem.product}
+              className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
+              placeholder={newItem.product ? 'Escribe la descripción (manual)' : 'Selecciona primero un Producto'}
+            />
+          ) : (
+            <select
+              value={newItem.description}
+              onChange={(e) => handleDescriptionChange(e.target.value)}
+              disabled={!newItem.product}
+              className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
+            >
+              <option value="">{newItem.product ? 'Seleccione Descripción' : 'Seleccione primero un Producto'}</option>
+              {descOptions.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.text}{d.estimated_unit_cost ? ` — $${fmtMoney(d.estimated_unit_cost)}` : ''}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Cantidad */}
@@ -574,7 +675,7 @@ export default function RequisitionItems({
                 estimated_total: computeTotal(val, p.estimated_unit_cost),
               }));
             }}
-            disabled={!newItem.description}
+            disabled={!baseEnabled}
             className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
         </div>
@@ -589,7 +690,7 @@ export default function RequisitionItems({
               const label = e.target.options[e.target.selectedIndex]?.text || '';
               setNewItem((p) => ({ ...p, unit: id, unit_label: label }));
             }}
-            disabled={!newItem.description}
+            disabled={!baseEnabled}
             className="border p-2 w-full rounded disabled:bg-gray-100 disabled:cursor-not-allowed"
           >
             <option value="">Seleccione Unidad</option>
@@ -599,7 +700,7 @@ export default function RequisitionItems({
           </select>
         </div>
 
-        {/* Costo unitario (READONLY) */}
+        {/* Costo unitario */}
         <div className="md:col-span-3">
           <label className="block mb-1 font-medium">Costo unitario</label>
           <input
@@ -607,12 +708,23 @@ export default function RequisitionItems({
             min="0"
             step="0.01"
             value={newItem.estimated_unit_cost}
-            readOnly
-            disabled={!newItem.description}
-            className="border p-2 w-full rounded bg-gray-100"
+            readOnly={!manualItemsMode}
+            disabled={!baseEnabled}
+            onChange={(e) => {
+              if (!manualItemsMode) return;
+              const val = e.target.value;
+              setNewItem((p) => ({
+                ...p,
+                estimated_unit_cost: val,
+                estimated_total: computeTotal(p.quantity, val),
+              }));
+            }}
+            className={`border p-2 w-full rounded ${manualItemsMode ? '' : 'bg-gray-100'}`}
             placeholder="0.00"
           />
-          <div className="text-[11px] text-gray-500 mt-1">Se llena automáticamente desde la descripción.</div>
+          <div className="text-[11px] text-gray-500 mt-1">
+            {manualItemsMode ? 'Captura manualmente el costo unitario.' : 'Se llena automáticamente desde la descripción.'}
+          </div>
         </div>
 
         {/* Total (READONLY) */}
@@ -641,21 +753,25 @@ export default function RequisitionItems({
             Clasificador
           </button>
 
-          <button
-            type="button"
-            onClick={handleOpenCatalog}
-            className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
-          >
-            Ver Catálogo
-          </button>
+          {!manualItemsMode && (
+            <>
+              <button
+                type="button"
+                onClick={handleOpenCatalog}
+                className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
+              >
+                Ver Catálogo
+              </button>
 
-          <button
-            type="button"
-            onClick={handleOpenRegistro}
-            className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
-          >
-            Registrar
-          </button>
+              <button
+                type="button"
+                onClick={handleOpenRegistro}
+                className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
+              >
+                Registrar
+              </button>
+            </>
+          )}
 
           <button
             type="button"
@@ -701,7 +817,7 @@ export default function RequisitionItems({
                 <td className="p-2 border">{p.unit_label}</td>
                 <td className="p-2 border">{p.estimated_unit_cost ? fmtMoneyLocale(p.estimated_unit_cost) : '—'}</td>
                 <td className="p-2 border">{fmtMoneyLocale(p.estimated_total)}</td>
-                <td className="p-2 border">{p.description_label}</td>
+                <td className="p-2 border">{p.description_label || p.manual_description || '—'}</td>
                 <td className="p-2 border">
                   <button
                     type="button"
@@ -722,7 +838,7 @@ export default function RequisitionItems({
           <input
             type="checkbox"
             checked={!!ackCostRealistic}
-            onChange={handleToggleAckCostRealistic}
+            onChange={(e) => setAckCostRealistic(e.target.checked)}
           />
           <span className="text-sm">
             Confirma <strong>“costo aproximado realista”</strong> para imprimir/exportar PDF.
@@ -730,7 +846,8 @@ export default function RequisitionItems({
         </label>
       </div>
 
-      {showCatalogModal && (
+      {/* Catálogo Modal (solo catálogo) */}
+      {showCatalogModal && !manualItemsMode && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={closeCatalog}>
           <div className="absolute inset-0 bg-black/50" />
           <div
@@ -858,7 +975,8 @@ export default function RequisitionItems({
         </div>
       )}
 
-      {showRegistroModal && (
+      {/* Registro Modal (solo catálogo) */}
+      {showRegistroModal && !manualItemsMode && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center" onClick={closeRegistro}>
           <div className="absolute inset-0 bg-black/50" />
           <div

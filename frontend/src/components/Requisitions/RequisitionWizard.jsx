@@ -143,6 +143,13 @@ export default function RequisitionWizard() {
   // ✅ Bloqueo si hay PDF seleccionado sin partidas marcadas
   const [quoteDraftInvalid, setQuoteDraftInvalid] = useState(false);
 
+  // ✅ modo manual (tender = NO APLICA)
+  const manualItemsMode = useMemo(() => {
+    const s = String(formData.tender_label || "").trim().toUpperCase();
+    if (!s) return false;
+    return s.includes("NO APLICA");
+  }, [formData.tender_label]);
+
   // --- Fetch Departments ---
   const [departments, setDepartments] = useState([]);
   useEffect(() => {
@@ -286,39 +293,61 @@ export default function RequisitionWizard() {
       const product = Number(it.product);
       const quantity = Number(it.quantity);
       const unit = Number(it.unit);
-      const description = Number(it.description);
+
+      const manualText = String(it.manual_description ?? "").trim();
+      const isManual = manualText.length > 0 || it.description === null || it.description === "" || typeof it.description === "undefined";
 
       let estimatedTotal = parseMoney(it.estimated_total);
 
+      const unitCost = parseMoney(it.estimated_unit_cost);
+
       if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
-        const unitCost = parseMoney(it.estimated_unit_cost);
         if (Number.isFinite(unitCost) && unitCost > 0 && Number.isFinite(quantity) && quantity > 0) {
           estimatedTotal = Number((unitCost * quantity).toFixed(2));
         }
       }
 
-      if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
-        invalidLines.push(idx + 1);
+      // Validaciones
+      if (!Number.isFinite(product) || product <= 0) invalidLines.push(idx + 1);
+      if (!Number.isFinite(quantity) || quantity <= 0) invalidLines.push(idx + 1);
+      if (!Number.isFinite(unit) || unit <= 0) invalidLines.push(idx + 1);
+
+      if (isManual) {
+        if (!manualText) invalidLines.push(idx + 1);
+        if (!Number.isFinite(unitCost) || unitCost <= 0) invalidLines.push(idx + 1);
+      } else {
+        const description = Number(it.description);
+        if (!Number.isFinite(description) || description <= 0) invalidLines.push(idx + 1);
       }
+
+      if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) invalidLines.push(idx + 1);
 
       const payloadItem = {
         ...(it.id ? { id: Number(it.id) } : {}),
         product,
         quantity,
         unit,
-        description,
         estimated_total: Number(estimatedTotal.toFixed(2)),
       };
 
-      const unitCost = parseMoney(it.estimated_unit_cost);
-      if (Number.isFinite(unitCost) && unitCost > 0) {
+      if (isManual) {
+        payloadItem.description = null;
+        payloadItem.manual_description = manualText;
         payloadItem.estimated_unit_cost = Number(unitCost.toFixed(2));
+      } else {
+        payloadItem.description = Number(it.description);
+        if (Number.isFinite(unitCost) && unitCost > 0) {
+          payloadItem.estimated_unit_cost = Number(unitCost.toFixed(2));
+        }
       }
 
       return payloadItem;
     });
 
-    return { invalidLines, normalizedItems };
+    // dedup invalid lines
+    const uniqInvalid = Array.from(new Set(invalidLines)).sort((a, b) => a - b);
+
+    return { invalidLines: uniqInvalid, normalizedItems };
   };
 
   const mergeItemIds = (localItems, serverItems) => {
@@ -327,13 +356,17 @@ export default function RequisitionWizard() {
       return Number.isFinite(n) ? Number(n).toFixed(2) : "";
     };
 
+    const normNull = (v) => (v === null || typeof v === "undefined" ? "" : String(v));
+    const normText = (v) => String(v ?? "").trim().toLowerCase();
+
     const keyOf = (it) =>
       [
-        String(it.product ?? ""),
-        String(it.description ?? ""),
-        String(it.unit ?? ""),
-        String(Number(it.quantity ?? "") || ""),
+        normNull(it.product),
+        normNull(it.unit),
+        normNull(Number(it.quantity ?? "") || ""),
         to2(it.estimated_total),
+        normNull(it.description),
+        normText(it.manual_description ?? it.description_text ?? it.description_label ?? ""),
       ].join("|");
 
     const buckets = new Map();
@@ -534,18 +567,15 @@ export default function RequisitionWizard() {
     if (autosaveSignature === lastSignatureRef.current) return;
 
     autosaveTimerRef.current = setTimeout(async () => {
-      // Marcar intento para no spamear
       lastSignatureRef.current = autosaveSignature;
 
       const r = await doSaveAll({ silent: true, interactiveDuplicates: false });
 
-      // Si el backend detectó duplicado, NO popup; solo aviso (una vez)
       if (!r.ok && r.needsConfirmation && !dupToastShownRef.current) {
         dupToastShownRef.current = true;
         showToast("⚠️ Posible duplicado detectado. Al guardar se te pedirá confirmación.", "error");
       }
 
-      // Si falló por otra cosa, permitimos reintentar
       if (!r.ok && !r.needsConfirmation) {
         lastSignatureRef.current = "";
       }
@@ -586,7 +616,7 @@ export default function RequisitionWizard() {
 
     const { invalidLines } = normalizeItemsForPayload(items);
     if (invalidLines.length) {
-      showToast(`Falta "Monto estimado" válido (> 0) en los renglones: ${invalidLines.join(", ")}`, "error");
+      showToast(`Falta información/total válido en los renglones: ${invalidLines.join(", ")}`, "error");
       return;
     }
 
@@ -596,7 +626,6 @@ export default function RequisitionWizard() {
 
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
 
-      // ✅ Aquí SÍ interactivo: si hay duplicado, confirm al GUARDAR
       const res = await doSaveAll({ silent: true, interactiveDuplicates: true });
       const saved = res?.data;
       const id = saved?.id || draftReqRef.current?.id;
@@ -675,6 +704,7 @@ export default function RequisitionWizard() {
             setItems={setItems}
             requisitionNumber={requisitionNumber}
             setRequisitionNumber={setRequisitionNumber}
+            manualItemsMode={manualItemsMode}
             ackCostRealistic={ackCostRealistic}
             setAckCostRealistic={setAckCostRealistic}
           />

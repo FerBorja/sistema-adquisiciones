@@ -120,16 +120,26 @@ def _get_header_ids_from_vd_only(vd: dict) -> dict:
 def _item_signature(item: RequisitionItem) -> str:
     """
     Firma del “artículo” para duplicados:
-      - product_id + description_id (lo más exacto para tu sistema)
-      - fallback a texto si existiera description_text (por si un día cambias serializer)
+      - product_id + description_id (catálogo)
+      - si NO hay description_id: product_id + manual_description (normalizado)
+      - fallback a texto si existiera description_text / description_display
     """
     pid = getattr(item, "product_id", None)
     did = getattr(item, "description_id", None)
+
+    md_raw = getattr(item, "manual_description", "") or ""
+    md_norm = _norm_text(md_raw)
+
     if pid and did:
         return f"p:{pid}|d:{did}"
+
+    if pid and md_norm:
+        return f"p:{pid}|m:{md_norm}"
+
     if pid:
         return f"p:{pid}"
-    desc_txt = getattr(item, "description_text", "") or getattr(item, "description_display", "")
+
+    desc_txt = md_raw or getattr(item, "description_text", "") or getattr(item, "description_display", "")
     desc_norm = _norm_text(desc_txt)
     return f"t:{desc_norm}" if desc_norm else "unknown"
 
@@ -245,7 +255,13 @@ def _find_possible_duplicates(
     qs = qs.prefetch_related(
         Prefetch(
             "items",
-            queryset=RequisitionItem.objects.only("id", "requisition_id", "product_id", "description_id"),
+            queryset=RequisitionItem.objects.only(
+                "id",
+                "requisition_id",
+                "product_id",
+                "description_id",
+                "manual_description",
+            ),
         )
     )
 
@@ -509,7 +525,7 @@ class RequisitionViewSet(viewsets.ModelViewSet):
             reason_norm = _norm_text(vd.get("requisition_reason", getattr(instance, "requisition_reason", "") or "") or "")
 
             items_qs = RequisitionItem.objects.filter(requisition=instance).only(
-                "id", "requisition_id", "product_id", "description_id"
+                "id", "requisition_id", "product_id", "description_id", "manual_description"
             )
             item_sigs = _build_item_sig_set(items_qs)
 
@@ -551,7 +567,7 @@ class RequisitionViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
 
         items_qs = RequisitionItem.objects.filter(requisition=instance).only(
-            "id", "requisition_id", "product_id", "description_id"
+            "id", "requisition_id", "product_id", "description_id", "manual_description"
         )
         item_sigs = _build_item_sig_set(items_qs)
 

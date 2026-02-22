@@ -323,7 +323,9 @@ def generate_requisition_pdf(requisition):
         for item in requisition.items.all():
             prod_label = _label_expense_object(_get(item, 'product')) or '—'
             unit_label = _label_unit(_get(item, 'unit')) or '—'
-            desc_label = _label_description(_get(item, 'description')) or '—'
+
+            manual = _as_text(_get(item, "manual_description"))
+            desc_label = manual or (_label_description(_get(item, 'description')) or '—')
 
             # quantity as Decimal (for calculations)
             qty_raw = _get(item, 'quantity')
