@@ -146,6 +146,38 @@ function getNiceDescDisplay({ row, descCache }) {
   return row?.description ? `ID: ${row.description}` : "";
 }
 
+/** ✅ Warning reusable: solo para modo manual (NO APLICA) */
+function ManualUomWarning({ unitLabel }) {
+  return (
+    <div
+      style={{
+        background: "#FFF3CD",
+        border: "1px solid #FFEEBA",
+        color: "#856404",
+        padding: "10px 12px",
+        borderRadius: 10,
+        marginBottom: 12,
+        lineHeight: 1.35,
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+        ⚠️ Importante (Licitación: NO APLICA)
+      </div>
+      <div>
+        La <b>descripción</b> que captures debe <b>coincidir con la Unidad de Medida</b>{" "}
+        (cuando aplique). Si cambias la unidad, revisa y ajusta la descripción para que
+        sea consistente.
+      </div>
+
+      {unitLabel ? (
+        <div style={{ marginTop: 6, fontSize: 13 }}>
+          Unidad seleccionada: <b>{unitLabel}</b>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SelectField({ label, value, onChange, options, getId, getLabel, placeholder }) {
   return (
     <div>
@@ -382,6 +414,13 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       labelFrom(catalogs?.tender || [], headerForm.tender, (r) => r.name ?? r.description ?? "") || "";
     return String(tenderLabel).toUpperCase().includes("NO APLICA");
   }, [catalogs, headerForm.tender]);
+
+  // ✅ Para el warning: unidad seleccionada en el form (si ya hay)
+  const currentUnitLabel = useMemo(() => {
+    if (!manualItemsMode) return "";
+    if (!form.unit) return "";
+    return labelFrom(units, form.unit, (r) => r.name ?? r.description ?? r.code ?? String(r.id));
+  }, [manualItemsMode, form.unit, units]);
 
   // ✅ Cancelar + Camino 2 rollback
   const handleCancelToList = async () => {
@@ -1432,6 +1471,9 @@ export default function RequisitionEditWizard({ requisition, onSaved }) {
       {step === 2 && (
         <section className="bg-white rounded-xl shadow p-4 md:p-6">
           <h2 className="text-lg font-semibold mb-4">Registro de Partidas</h2>
+
+          {/* ✅ WARNING solo en modo manual */}
+          {manualItemsMode ? <ManualUomWarning unitLabel={currentUnitLabel} /> : null}
 
           {loadingCatalogs ? (
             <LoadingSpinner />

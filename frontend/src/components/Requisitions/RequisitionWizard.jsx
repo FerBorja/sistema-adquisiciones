@@ -144,10 +144,11 @@ export default function RequisitionWizard() {
   const [quoteDraftInvalid, setQuoteDraftInvalid] = useState(false);
 
   // ✅ modo manual (tender = NO APLICA)
+  // (para mostrar advertencia: descripción debe coincidir con Unidad de Medida)
   const manualItemsMode = useMemo(() => {
-    const s = String(formData.tender_label || "").trim().toUpperCase();
+    const s = String(formData.tender_label || "").trim();
     if (!s) return false;
-    return s.includes("NO APLICA");
+    return /NO\s*APLICA/i.test(s);
   }, [formData.tender_label]);
 
   // --- Fetch Departments ---
@@ -239,7 +240,10 @@ export default function RequisitionWizard() {
 
     const deptId = findDepartmentId();
     if (!deptId) {
-      showToast("No se pudo determinar el Departamento Solicitante (catálogo). Revisa el campo.", "error");
+      showToast(
+        "No se pudo determinar el Departamento Solicitante (catálogo). Revisa el campo.",
+        "error"
+      );
       return;
     }
 
@@ -247,14 +251,16 @@ export default function RequisitionWizard() {
   };
 
   // ===== Helpers =====
-  const idOrUndef = (v) => (v === "" || v === null || typeof v === "undefined" ? undefined : Number(v));
+  const idOrUndef = (v) =>
+    v === "" || v === null || typeof v === "undefined" ? undefined : Number(v);
 
   const strOrUndef = (v) => {
     const s = (v ?? "").toString().trim();
     return s.length ? s : undefined;
   };
 
-  const compact = (obj) => Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v !== "undefined"));
+  const compact = (obj) =>
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => typeof v !== "undefined"));
 
   const parseMoney = (v) => {
     if (v === null || typeof v === "undefined") return NaN;
@@ -295,14 +301,23 @@ export default function RequisitionWizard() {
       const unit = Number(it.unit);
 
       const manualText = String(it.manual_description ?? "").trim();
-      const isManual = manualText.length > 0 || it.description === null || it.description === "" || typeof it.description === "undefined";
+      const isManual =
+        manualText.length > 0 ||
+        it.description === null ||
+        it.description === "" ||
+        typeof it.description === "undefined";
 
       let estimatedTotal = parseMoney(it.estimated_total);
 
       const unitCost = parseMoney(it.estimated_unit_cost);
 
       if (!Number.isFinite(estimatedTotal) || estimatedTotal <= 0) {
-        if (Number.isFinite(unitCost) && unitCost > 0 && Number.isFinite(quantity) && quantity > 0) {
+        if (
+          Number.isFinite(unitCost) &&
+          unitCost > 0 &&
+          Number.isFinite(quantity) &&
+          quantity > 0
+        ) {
           estimatedTotal = Number((unitCost * quantity).toFixed(2));
         }
       }
@@ -411,7 +426,8 @@ export default function RequisitionWizard() {
     const header = buildHeaderPayload();
     if (!header) return { ok: false, error: "HEADER" };
 
-    if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) return { ok: false, error: "NO_ITEMS" };
+    if (!Array.isArray(normalizedItems) || normalizedItems.length === 0)
+      return { ok: false, error: "NO_ITEMS" };
 
     setDraftBusy(true);
 
@@ -474,7 +490,12 @@ export default function RequisitionWizard() {
       }
 
       const created = createdRes.data;
-      return { ok: true, data: created, forced: !!createdRes.forced, duplicates: createdRes.duplicates };
+      return {
+        ok: true,
+        data: created,
+        forced: !!createdRes.forced,
+        duplicates: createdRes.duplicates,
+      };
     }
 
     // 2) Si ya existe → PUT
@@ -513,7 +534,9 @@ export default function RequisitionWizard() {
       }
 
       if (!silent) {
-        const extra = result.forced ? " (Confirmaste posible duplicado)" : " (Sin duplicados detectados)";
+        const extra = result.forced
+          ? " (Confirmaste posible duplicado)"
+          : " (Sin duplicados detectados)";
         showToast(`OK.${extra}`, "success");
       }
 
@@ -594,7 +617,10 @@ export default function RequisitionWizard() {
     if (savingRef.current) return;
 
     if (quoteDraftInvalid) {
-      showToast("Tienes una cotización seleccionada pero sin partidas marcadas. Completa los checkboxes o quita el PDF.", "error");
+      showToast(
+        "Tienes una cotización seleccionada pero sin partidas marcadas. Completa los checkboxes o quita el PDF.",
+        "error"
+      );
       return;
     }
 
@@ -704,7 +730,10 @@ export default function RequisitionWizard() {
             setItems={setItems}
             requisitionNumber={requisitionNumber}
             setRequisitionNumber={setRequisitionNumber}
+            // ✅ tu prop actual
             manualItemsMode={manualItemsMode}
+            // ✅ prop extra por compatibilidad (para el warning)
+            manualMode={manualItemsMode}
             ackCostRealistic={ackCostRealistic}
             setAckCostRealistic={setAckCostRealistic}
           />

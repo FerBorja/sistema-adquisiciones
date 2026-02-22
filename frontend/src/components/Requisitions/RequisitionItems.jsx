@@ -3,6 +3,38 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import apiClient from '../../api/apiClient';
 import { useToast } from '../../contexts/ToastContext';
 
+/** ✅ Alert reusable: solo para modo manual (NO APLICA) */
+function ManualUomWarning({ unitLabel }) {
+  return (
+    <div
+      style={{
+        background: '#FFF3CD',
+        border: '1px solid #FFEEBA',
+        color: '#856404',
+        padding: '10px 12px',
+        borderRadius: 10,
+        marginBottom: 12,
+        lineHeight: 1.35,
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+        ⚠️ Importante (Licitación: NO APLICA)
+      </div>
+      <div>
+        La <b>descripción</b> que captures debe <b>coincidir con la Unidad de Medida</b>{' '}
+        (cuando aplique). Si cambias la unidad, revisa y ajusta la descripción para que
+        sea consistente.
+      </div>
+
+      {unitLabel ? (
+        <div style={{ marginTop: 6, fontSize: 13 }}>
+          Unidad seleccionada: <b>{unitLabel}</b>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function RequisitionItems({
   formData,
   items, setItems,
@@ -569,6 +601,14 @@ export default function RequisitionItems({
 
   const baseEnabled = manualItemsMode ? !!newItem.product : !!newItem.description;
 
+  // ✅ Para el warning: unidad seleccionada (si ya hay)
+  const currentUnitLabel = useMemo(() => {
+    if (!manualItemsMode) return '';
+    const id = String(newItem.unit || '');
+    if (!id) return '';
+    return units.find((u) => String(u.id) === id)?.label || '';
+  }, [manualItemsMode, newItem.unit, units]);
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 mt-2 mb-4">
@@ -594,6 +634,9 @@ export default function RequisitionItems({
       <div className="my-6 border-t border-gray-200" />
 
       <h3 className="text-lg font-semibold mb-2">Registro de Partidas</h3>
+
+      {/* ✅ WARNING solo en modo manual */}
+      {manualItemsMode ? <ManualUomWarning unitLabel={currentUnitLabel} /> : null}
 
       <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end mb-3">
         {/* Objeto del Gasto */}
@@ -757,7 +800,7 @@ export default function RequisitionItems({
             <>
               <button
                 type="button"
-                onClick={handleOpenCatalog}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); openCatalog(); }}
                 className="inline-flex items-center gap-2 rounded-md border border-blue-300 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
               >
                 Ver Catálogo
@@ -765,7 +808,7 @@ export default function RequisitionItems({
 
               <button
                 type="button"
-                onClick={handleOpenRegistro}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); openRegistro(); }}
                 className="inline-flex items-center gap-2 rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
               >
                 Registrar
